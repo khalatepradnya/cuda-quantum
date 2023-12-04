@@ -32,8 +32,8 @@ def test_fswap_lib_kernel():
         fermionic_swap(angle, q[0], q[1])
     
     ss_01 = cudaq.get_state(bar, angle)
-    assert np.isclose(np.abs(ss_01[1] - (-1j * np.exp(1j * angle / 2.0) * si)), 0.0, 1e-3)
-    assert np.isclose(np.abs(ss_01[2] - (np.exp(1j * angle / 2.0) * c)), 0.0, 1e-3)
+    assert np.isclose(np.abs(ss_01[1] - (-1j * np.exp(1j * angle / 2.0) * si)), 0.0, atol=1e-3)
+    assert np.isclose(np.abs(ss_01[2] - (np.exp(1j * angle / 2.0) * c)), 0.0, atol=1e-3)
 
 def test_givens_lib_kernel():
     cudaq.enable_jit()
