@@ -125,6 +125,8 @@ add_mlir_python_modules(CUDAQuantumPythonModules
   )
 
 file (COPY cudaq DESTINATION ${MLIR_BINARY_DIR}/python_packages/cudaq)
+## [INSTALL CHECK] : Uncomment the following line to get the files above in the install directory
+# install(DIRECTORY cudaq DESTINATION python_packages/cudaq)
 
 if (CUDAQ_BUILD_TESTS)
  add_subdirectory(tests)
