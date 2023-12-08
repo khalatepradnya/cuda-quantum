@@ -114,10 +114,7 @@ protected:
                    [](auto &&el) { return el.id; });
 
     if (!unitaryOrState.empty()) {
-      if (gateName == "init_state")
-        simulator()->initializeState(localT, unitaryOrState);
-      else
-        simulator()->applyCustomOperation(unitaryOrState, localC, localT);
+      simulator()->applyCustomOperation(unitaryOrState, localC, localT);
       return;
     }
 
