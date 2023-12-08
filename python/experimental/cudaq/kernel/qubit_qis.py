@@ -14,7 +14,6 @@ from abc import abstractmethod, ABCMeta
 import inspect
 import numpy as np
 from mlir_cudaq._mlir_libs._quakeDialects import cudaq_runtime
-from .utils import globalRegisteredUnitaries
 from typing import Callable
 
 qvector = cudaq_runtime.qvector
@@ -323,50 +322,3 @@ def compute_action(compute, action):
     compute()
     action()
     adjoint(compute)
-
-
-def register_operation(unitary, operation_name=None):
-    global globalRegisteredUnitaries
-    """
-    Register a new quantum operation at runtime. Users must 
-    provide the unitary matrix as a 2D NumPy array. The operation 
-    name is inferred from the name of the assigned variable. 
-
-    .. code:: python 
-
-        myOp = cudaq.register_operation(unitary)
-
-        @cudaq.kernel
-        def kernel():
-            ...
-            myOp(...)
-            ...
-
-    """
-    if operation_name == None:
-        lastFrame = inspect.currentframe().f_back
-        frameInfo = inspect.getframeinfo(lastFrame)
-        codeContext = frameInfo.code_context[0]
-        if not '=' in codeContext:
-            raise RuntimeError(
-                "[register_operation] operation_name not given and variable name not set."
-            )
-        operation_name = codeContext.split('=')[0].strip()
-
-    numParameters = 0
-    if isinstance(unitary, Callable):
-        numParameters = len(inspect.getfullargspec(unitary).args)
-
-    # register a new function for kernels of the given
-    # name, have it apply the unitary data
-    registeredOp = type(
-        operation_name, (quantum_operation,), {
-            'get_name': staticmethod(lambda: operation_name),
-            'get_unitary': staticmethod(lambda: unitary),
-            'get_num_parameters': staticmethod(lambda: numParameters)
-        })
-
-    # Register the operation name so JIT AST can
-    # get it.
-    globalRegisteredUnitaries[operation_name] = unitary
-    return registeredOp()
