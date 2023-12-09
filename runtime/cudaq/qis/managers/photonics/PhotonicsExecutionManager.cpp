@@ -108,8 +108,7 @@ protected:
   }
 
   /// @brief Method for performing qudit measurement.
-  int measureQudit(const cudaq::QuditInfo &q,
-                   const std::string &registerName) override {
+  int measureQudit(const cudaq::QuditInfo &q) override {
     if (executionContext && executionContext->name == "sample") {
       sampleQudits.push_back(q);
       return 0;
@@ -248,7 +247,7 @@ public:
   PhotonicsExecutionManager() {
 
     instructions.emplace("plusGate", [&](const Instruction &inst) {
-      auto &[gateName, params, controls, qudits, spin_op, unitary] = inst;
+      auto &[gateName, params, controls, qudits, spin_op] = inst;
       auto target = qudits[0];
       int d = target.levels;
       qpp::cmat u{qpp::cmat::Zero(d, d)};
@@ -257,11 +256,11 @@ public:
         u(i, i - 1) = 1;
       }
       cudaq::info("Applying plusGate on {}<{}>", target.id, target.levels);
-      state = qpp::applyCTRL(state, u, {}, {target.id}, target.levels);
+      state = qpp::apply(state, u, {target.id}, target.levels);
     });
 
     instructions.emplace("beamSplitterGate", [&](const Instruction &inst) {
-      auto &[gateName, params, controls, qudits, spin_op, unitary] = inst;
+      auto &[gateName, params, controls, qudits, spin_op] = inst;
       auto target1 = qudits[0];
       auto target2 = qudits[1];
       size_t d = target1.levels;
@@ -274,7 +273,7 @@ public:
     });
 
     instructions.emplace("phaseShiftGate", [&](const Instruction &inst) {
-      auto &[gateName, params, controls, qudits, spin_op, unitary] = inst;
+      auto &[gateName, params, controls, qudits, spin_op] = inst;
       auto target = qudits[0];
       size_t d = target.levels;
       const double phi = params[0];
@@ -285,7 +284,7 @@ public:
       }
       cudaq::info("Applying phaseShiftGate on {}<{}>", target.id,
                   target.levels);
-      state = qpp::applyCTRL(state, PS, {}, {target.id}, target.levels);
+      state = qpp::apply(state, PS, {target.id}, target.levels);
     });
   }
 

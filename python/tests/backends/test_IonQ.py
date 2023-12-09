@@ -18,6 +18,7 @@ except:
 # Define the port for the mock server
 port = 62441
 
+
 def assert_close(got) -> bool:
     return got < -1.5 and got > -1.9
 
@@ -28,7 +29,7 @@ def startUpMockServer():
 
     # Set the targeted QPU
     cudaq.set_target("ionq", url="http://localhost:{}".format(port))
-    
+
     # Launch the Mock Server
     p = Process(target=startServer, args=(port,))
     p.start()

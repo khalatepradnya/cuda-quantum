@@ -9,6 +9,7 @@
 #include "cudaq/Optimizer/Dialect/Quake/QuakeOps.h"
 #include "cudaq/Optimizer/Dialect/CC/CCTypes.h"
 #include "cudaq/Optimizer/Dialect/Quake/QuakeDialect.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "mlir/Dialect/LLVMIR/LLVMTypes.h"
 #include "mlir/Dialect/Utils/IndexingUtils.h"
 #include "mlir/Dialect/Utils/StructuredOpsUtils.h"
@@ -23,10 +24,45 @@ namespace {
 #include "cudaq/Optimizer/Dialect/Quake/Canonical.inc"
 } // namespace
 
+// Is \p op in the Quake dialect?
+// TODO: Is this StringRef comparison faster than calling MLIRContext::
+// getLoadedDialect("quake")?
 static bool isQuakeOperation(Operation *op) {
   if (auto *dialect = op->getDialect())
     return dialect->getNamespace().equals("quake");
   return false;
+}
+
+// If a wire value is used more than once but in distinct blocks, assume that
+// the uses are dynamically mutually exclusive. This is an approximation and not
+// sufficient to prove the value has a linear type.
+// TODO: implement an analysis that proves the control-flow to the blocks is
+// mutually exclusive (a then and an else block, for example).
+inline static bool allUsesInDistinctBlocks(Operation *defOp, Value v) {
+  SmallPtrSet<Block *, 4> blockSet;
+  for (Operation *u : v.getUsers()) {
+    // If `u` is not in quake, then it is not a quantum operation. Skip it.
+    if (!isQuakeOperation(u))
+      continue;
+    Block *b = u->getBlock();
+    if (blockSet.count(b))
+      return false;
+    blockSet.insert(b);
+  }
+  return true;
+}
+
+static LogicalResult verifyWireResultsAreLinear(Operation *op) {
+  for (Value v : op->getOpResults())
+    if (isa<quake::WireType>(v.getType())) {
+      // Terminators can forward wire values, but they are not quantum
+      // operations.
+      if (v.hasOneUse() || allUsesInDistinctBlocks(op, v))
+        continue;
+      return op->emitOpError(
+          "wires are a linear type and must have exactly one use");
+    }
+  return success();
 }
 
 /// When a quake operation is in value form, the number of wire arguments (wire
@@ -584,63 +620,6 @@ void quake::WrapOp::getCanonicalizationPatterns(RewritePatternSet &patterns,
 }
 
 //===----------------------------------------------------------------------===//
-// UnitaryOp
-//===----------------------------------------------------------------------===//
-
-/// @brief Verify we have correct Attribute structure for
-/// unitary matrix elements.
-LogicalResult quake::UnitaryOp::verify() {
-
-  auto op = getOperation();
-  auto targets = getTargets();
-  auto constantUnitary = getConstantUnitary();
-  if (constantUnitary.has_value()) {
-    auto unitary = constantUnitary.value();
-    for (auto element : unitary) {
-      auto arrAttr = dyn_cast<DenseF32ArrayAttr>(element);
-      if (!arrAttr)
-        return op->emitOpError(
-            "quake.unitary must be an ArrayAttr containing "
-            "DenseF32ArrayAttr elements, where each element is the real "
-            "and imaginary part of the matrix element.");
-      if (arrAttr.size() != 2)
-        return op->emitOpError("unitary elements must be of size 2, the real "
-                               "and imaginary parts.");
-    }
-
-    // verify correct number of unitary elements
-    std::size_t numQubits = 0;
-    for (auto target : targets)
-      if (auto veqTy = dyn_cast<quake::VeqType>(target.getType())) {
-        if (!veqTy.hasSpecifiedSize())
-          return op->emitOpError(
-              "quake.unitary cannot have runtime-known veq<?> types for "
-              "constant-sized matrix data.");
-        numQubits += veqTy.getSize();
-      } else // otherwise, must be a quake.ref
-        numQubits++;
-
-    // Should have 2**NumQ x 2**NumQ
-    std::size_t expectedNumElements = (1UL << numQubits) * (1UL << numQubits);
-    if (expectedNumElements != unitary.size())
-      return op->emitOpError(
-          "invalid number of unitary matrix elements. For " +
-          std::to_string(targets.size()) + " qubits, there should be " +
-          std::to_string(expectedNumElements) + " elements. (" +
-          std::to_string(unitary.size()) + " provided)");
-
-    return success();
-  }
-
-  auto unitary = getUnitary();
-  if (!unitary)
-    return op->emitOpError(
-        "must have unitary value if constant unitary data not provided.");
-
-  return success();
-}
-
-//===----------------------------------------------------------------------===//
 // Measurements (MxOp, MyOp, MzOp)
 //===----------------------------------------------------------------------===//
 
@@ -648,34 +627,55 @@ LogicalResult quake::UnitaryOp::verify() {
 static LogicalResult verifyMeasurements(Operation *const op,
                                         TypeRange targetsType,
                                         const Type bitsType) {
+  if (failed(verifyWireResultsAreLinear(op)))
+    return failure();
   bool mustBeStdvec =
       targetsType.size() > 1 ||
-      (targetsType.size() == 1 && targetsType[0].isa<quake::VeqType>());
+      (targetsType.size() == 1 && isa<quake::VeqType>(targetsType[0]));
   if (mustBeStdvec) {
-    if (!op->getResult(0).getType().isa<cudaq::cc::StdvecType>())
-      return op->emitOpError("must return `!cc.stdvec<i1>`, when measuring a "
-                             "qreg, a series of qubits, or both");
+    if (!isa<cudaq::cc::StdvecType>(op->getResult(0).getType()))
+      return op->emitOpError("must return `!cc.stdvec<!quake.measure>`, when "
+                             "measuring a qreg, a series of qubits, or both");
   } else {
-    if (!op->getResult(0).getType().isa<IntegerType>())
+    if (!isa<quake::MeasureType>(op->getResult(0).getType()))
       return op->emitOpError(
-          "must return `i1` when measuring exactly one qubit");
+          "must return `!quake.measure` when measuring exactly one qubit");
   }
   return success();
 }
 
 LogicalResult quake::MxOp::verify() {
   return verifyMeasurements(getOperation(), getTargets().getType(),
-                            getBits().getType());
+                            getMeasOut().getType());
 }
 
 LogicalResult quake::MyOp::verify() {
   return verifyMeasurements(getOperation(), getTargets().getType(),
-                            getBits().getType());
+                            getMeasOut().getType());
 }
 
 LogicalResult quake::MzOp::verify() {
   return verifyMeasurements(getOperation(), getTargets().getType(),
-                            getBits().getType());
+                            getMeasOut().getType());
+}
+
+//===----------------------------------------------------------------------===//
+// Discriminate
+//===----------------------------------------------------------------------===//
+
+LogicalResult quake::DiscriminateOp::verify() {
+  if (isa<cudaq::cc::StdvecType>(getMeasurement().getType())) {
+    auto stdvecTy = dyn_cast<cudaq::cc::StdvecType>(getResult().getType());
+    if (!stdvecTy || !isa<IntegerType>(stdvecTy.getElementType()))
+      return emitOpError("must return a !cc.stdvec<integral> type, when "
+                         "discriminating a qreg, a series of qubits, or both");
+  } else {
+    auto measTy = isa<quake::MeasureType>(getMeasurement().getType());
+    if (!measTy || !isa<IntegerType>(getResult().getType()))
+      return emitOpError(
+          "must return integral type when discriminating exactly one qubit");
+  }
+  return success();
 }
 
 //===----------------------------------------------------------------------===//
@@ -998,6 +998,8 @@ void quake::getOperatorEffectsImpl(EffectsVectorImpl &effects,
   MACRO(R1Op) MACRO(RxOp) MACRO(RyOp) MACRO(RzOp) MACRO(PhasedRxOp)
 #define MEASURE_OPS(MACRO) MACRO(MxOp) MACRO(MyOp) MACRO(MzOp)
 #define QUANTUM_OPS(MACRO) MACRO(ResetOp) GATE_OPS(MACRO) MEASURE_OPS(MACRO)
+#define WIRE_OPS(MACRO) MACRO(FromControlOp) MACRO(ResetOp) MACRO(NullWireOp)  \
+  MACRO(UnwrapOp)
 // clang-format on
 #define INSTANTIATE_CALLBACKS(Op)                                              \
   void quake::Op::getEffects(                                                  \
@@ -1007,6 +1009,15 @@ void quake::getOperatorEffectsImpl(EffectsVectorImpl &effects,
   }
 
 QUANTUM_OPS(INSTANTIATE_CALLBACKS)
+
+#define INSTANTIATE_LINEAR_TYPE_VERIFY(Op)                                     \
+  LogicalResult quake::Op::verify() {                                          \
+    return verifyWireResultsAreLinear(getOperation());                         \
+  }
+
+#define VERIFY_OPS(MACRO) GATE_OPS(MACRO) WIRE_OPS(MACRO)
+
+VERIFY_OPS(INSTANTIATE_LINEAR_TYPE_VERIFY)
 
 //===----------------------------------------------------------------------===//
 // Generated logic

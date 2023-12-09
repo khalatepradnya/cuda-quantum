@@ -63,58 +63,17 @@ class quantum_operation(object):
         return 0
 
     @classmethod
-    def get_unitary(cls):
-        return []
-
-    @classmethod
-    def __validateAndProcessUnitary(cls, unitary):
-        if not hasattr(unitary, 'shape'):
-            raise RuntimeError('custom unitary must be a numpy array.')
-
-        shape = unitary.shape
-        if len(unitary.shape) != 2:
-            raise RuntimeError("custom unitary must be a 2D numpy array.")
-
-        if shape[0] != shape[1]:
-            raise RuntimeError("custom unitary must be square matrix.")
-
-        numTargets = np.log2(shape[0])
-
-        # Flatten the array
-        unitary = list(unitary.flat)
-        return unitary, numTargets
-
-    @classmethod
     def __call__(cls, *args):
         """
         Invoke the quantum operation. The args can contain float parameters (of the
         correct number according to get_num_parameters) and quantum types (qubit, qvector, qview).
         """
         opName = cls.get_name()
-        unitary = cls.get_unitary()
         parameters = list(args)[:cls.get_num_parameters()]
         quantumArguments = list(args)[cls.get_num_parameters():]
         qubitIds = [q for q in processQubitIds(opName, *quantumArguments)]
 
-        # If the unitary is callable, evaluate it
-        if isinstance(unitary, Callable):
-            unitary = unitary(*parameters)
-
-        if len(unitary) > 0:
-            unitary, numTargets = quantum_operation.__validateAndProcessUnitary(
-                unitary)
-            # Disable operation broadcasting for custom unitaries
-            if numTargets != len(qubitIds):
-                raise RuntimeError(
-                    "incorrect number of target qubits provided.")
-
-            cudaq_runtime.applyQuantumOperation(opName, parameters,
-                                                [], qubitIds, False,
-                                                SpinOperator(), unitary)
-            return
-
-        # Not a custom unitary, handle basic quantum operation,
-        # with optional broadcasting
+        # Handle basic quantum operation, with optional broadcasting
         [
             cudaq_runtime.applyQuantumOperation(opName, parameters, [], [q],
                                                 False, SpinOperator())
@@ -129,25 +88,11 @@ class quantum_operation(object):
         to get_num_parameters) and quantum types (qubit, qvector, qview).
         """
         opName = cls.get_name()
-        unitary = cls.get_unitary()
         parameters = list(args)[:cls.get_num_parameters()]
         quantumArguments = list(args)[cls.get_num_parameters():]
         qubitIds = processQubitIds(opName, *quantumArguments)
         controls = qubitIds[:len(qubitIds) - 1]
         targets = [qubitIds[-1]]
-        # If the unitary is callable, evaluate it
-        if isinstance(unitary, Callable):
-            unitary = unitary(*parameters)
-
-        if len(unitary) > 0:
-            unitary, numTargets = quantum_operation.__validateAndProcessUnitary(
-                unitary)
-            controls = qubitIds[:len(qubitIds) - int(numTargets)]
-            targets = qubitIds[-int(numTargets):]
-            # Disable operation broadcasting for custom unitaries
-            if numTargets != len(targets):
-                raise RuntimeError(
-                    "incorrect number of target qubits provided.")
 
         for q in quantumArguments:
             if isinstance(q, qubit) and q.is_negated():
@@ -155,7 +100,7 @@ class quantum_operation(object):
 
         cudaq_runtime.applyQuantumOperation(opName, parameters,
                                             controls, targets, False,
-                                            SpinOperator(), unitary)
+                                            SpinOperator())
         for q in quantumArguments:
             if isinstance(q, qubit) and q.is_negated():
                 x()(q)
@@ -169,31 +114,11 @@ class quantum_operation(object):
         to get_num_parameters) and quantum types (qubit, qvector, qview).
         """
         opName = cls.get_name()
-        unitary = cls.get_unitary()
         parameters = list(args)[:cls.get_num_parameters()]
         quantumArguments = list(args)[cls.get_num_parameters():]
         qubitIds = [q for q in processQubitIds(opName, *quantumArguments)]
 
-        # If the unitary is callable, evaluate it
-        if isinstance(unitary, Callable):
-            unitary = unitary(*parameters)
-
-        if len(unitary) > 0:
-            unitary, numTargets = quantum_operation.__validateAndProcessUnitary(
-                unitary)
-            # Disable operation broadcasting for custom unitaries
-            if numTargets != len(qubitIds):
-                raise RuntimeError(
-                    "incorrect number of target qubits provided.")
-
-            cudaq_runtime.applyQuantumOperation(opName,
-                                                [-1 * p for p in parameters],
-                                                [], qubitIds, False,
-                                                SpinOperator(), unitary)
-            return
-
-        # Not a custom unitary, handle basic quantum operation,
-        # with optional broadcasting
+        # Handle basic quantum operation, with optional broadcasting
         [
             cudaq_runtime.applyQuantumOperation(opName,
                                                 [-1 * p

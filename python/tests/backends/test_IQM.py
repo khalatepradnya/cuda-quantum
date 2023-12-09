@@ -26,6 +26,7 @@ except:
 # Define the port for the mock server
 port = 62443
 
+
 def assert_close(want, got, tolerance=1.0e-5) -> bool:
     return abs(want - got) < tolerance
 
