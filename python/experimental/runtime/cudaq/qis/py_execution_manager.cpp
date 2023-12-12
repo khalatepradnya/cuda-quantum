@@ -44,7 +44,6 @@ void bindExecutionManager(py::module &mod) {
   mod.def("endCtrlRegion", [](std::size_t nControls) {
     cudaq::getExecutionManager()->endCtrlRegion(nControls);
   });
-
   mod.def("measure", [](std::size_t id) {
         return cudaq::getExecutionManager()->measure(cudaq::QuditInfo(2, id));
       },

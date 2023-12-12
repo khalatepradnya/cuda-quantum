@@ -187,6 +187,7 @@ class CheckAndCorrectFunctionName(ast.NodeTransformer):
             node.name = self.desiredName
         return node
 
+
 class FindDepKernelsVisitor(ast.NodeVisitor):
 
     def __init__(self, ctx):
