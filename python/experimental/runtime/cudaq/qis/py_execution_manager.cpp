@@ -27,7 +27,6 @@ void bindExecutionManager(py::module &mod) {
                        [](auto &&el) { return cudaq::QuditInfo(2, el); });
         std::transform(targets.begin(), targets.end(), std::back_inserter(t),
                        [](auto &&el) { return cudaq::QuditInfo(2, el); });
-        
         cudaq::getExecutionManager()->apply(name, params, c, t, isAdjoint, op);
       },
       py::arg("name"), py::arg("params"), py::arg("controls"),

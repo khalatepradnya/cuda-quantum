@@ -6,8 +6,8 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-# Library Mode QIS
-# qubit, qvector, qview all defined in C++
+# Eager Mode QIS
+# `qubit`, `qvector`, `qview` all defined in C++
 # (better tracking of construction / destruction)
 
 from abc import abstractmethod, ABCMeta
@@ -26,7 +26,7 @@ def processQubitIds(opName, *args):
     """
     Return the qubit unique ID integers for a general tuple of 
     kernel arguments, where all arguments are assumed to be qubit-like 
-    (qvector, qview, qubit).
+    (`qvector`, `qview`, `qubit`).
     """
     qubitIds = []
     for a in args:
@@ -65,15 +65,14 @@ class quantum_operation(object):
     @classmethod
     def __call__(cls, *args):
         """
-        Invoke the quantum operation. The args can contain float parameters (of the
-        correct number according to get_num_parameters) and quantum types (qubit, qvector, qview).
+        Invoke the quantum operation. The arguments can contain float parameters (of the
+        correct number according to `get_num_parameters`) and quantum types (`qubit`, `qvector`, `qview`).
         """
         opName = cls.get_name()
         parameters = list(args)[:cls.get_num_parameters()]
         quantumArguments = list(args)[cls.get_num_parameters():]
         qubitIds = [q for q in processQubitIds(opName, *quantumArguments)]
 
-        # Handle basic quantum operation, with optional broadcasting
         [
             cudaq_runtime.applyQuantumOperation(opName, parameters, [], [q],
                                                 False, SpinOperator())
@@ -84,8 +83,8 @@ class quantum_operation(object):
     def ctrl(cls, *args):
         """
         Invoke the general controlled version of the quantum operation. 
-        The args can contain float parameters (of the correct number according
-        to get_num_parameters) and quantum types (qubit, qvector, qview).
+        The arguments can contain float parameters (of the correct number according
+        to `get_num_parameters`) and quantum types (`qubit`, `qvector`, `qview`).
         """
         opName = cls.get_name()
         parameters = list(args)[:cls.get_num_parameters()]
@@ -98,9 +97,8 @@ class quantum_operation(object):
             if isinstance(q, qubit) and q.is_negated():
                 x()(q)
 
-        cudaq_runtime.applyQuantumOperation(opName, parameters,
-                                            controls, targets, False,
-                                            SpinOperator())
+        cudaq_runtime.applyQuantumOperation(opName, parameters, controls,
+                                            targets, False, SpinOperator())
         for q in quantumArguments:
             if isinstance(q, qubit) and q.is_negated():
                 x()(q)
@@ -110,15 +108,14 @@ class quantum_operation(object):
     def adj(cls, *args):
         """
         Invoke the general adjoint version of the quantum operation. 
-        The args can contain float parameters (of the correct number according
-        to get_num_parameters) and quantum types (qubit, qvector, qview).
+        The arguments can contain float parameters (of the correct number according
+        to `get_num_parameters`) and quantum types (`qubit`, `qvector`, `qview`).
         """
         opName = cls.get_name()
         parameters = list(args)[:cls.get_num_parameters()]
         quantumArguments = list(args)[cls.get_num_parameters():]
         qubitIds = [q for q in processQubitIds(opName, *quantumArguments)]
 
-        # Handle basic quantum operation, with optional broadcasting
         [
             cudaq_runtime.applyQuantumOperation(opName,
                                                 [-1 * p
@@ -128,7 +125,7 @@ class quantum_operation(object):
         ]
 
 
-# Define our quantum operatations
+# Define our quantum operations
 h = type('h', (quantum_operation,), {'get_name': staticmethod(lambda: 'h')})
 x = type('x', (quantum_operation,), {'get_name': staticmethod(lambda: 'x')})
 y = type('y', (quantum_operation,), {'get_name': staticmethod(lambda: 'y')})
