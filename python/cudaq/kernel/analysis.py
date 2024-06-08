@@ -315,3 +315,20 @@ class HasReturnNodeVisitor(ast.NodeVisitor):
         for n in node.body:
             if isinstance(n, ast.Return) and n.value != None:
                 self.hasReturnNode = True
+
+
+def preprocessCustomOperationLambda(unitaryCallable, desiredName):
+    """
+    Given a callable custom unitary operation (`cudaq.register_operation(lambda param : np.array(...))`), 
+    convert the matrix to a list within the NumPy array and raise the lambda 
+    to a function. Return the AST Module for parsing and visitation.
+    """
+    unitarySrc = inspect.getsource(unitaryCallable)
+    leadingSpaces = len(unitarySrc) - len(unitarySrc.lstrip())
+    unitarySrc = '\n'.join(
+        [line[leadingSpaces:] for line in unitarySrc.split('\n')])
+    unitaryModule = ast.parse(unitarySrc)
+    MatrixToRowMajorList().visit(unitaryModule)
+    LambdaOrLambdaAssignToFunctionDef().visit(unitaryModule)
+    CheckAndCorrectFunctionName(desiredName).visit(unitaryModule)
+    return unitaryModule

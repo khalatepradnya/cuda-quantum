@@ -235,6 +235,15 @@ public:
         std::move(m_state), std::vector<MPSTensor>{stateTensor}, m_cutnHandle);
   }
 
+  /// @brief Apply quantum gate on 2 or less qubits
+  void applyGate(const GateApplicationTask &task) override {
+    const auto &targets = task.targets;
+    if (targets.size() > 2) {
+      throw std::runtime_error("Gates on 3 or more qubits are unsupported.");
+    }
+    SimulatorTensorNetBase::applyGate(task);
+  }
+
   virtual ~SimulatorMPS() noexcept {
     for (auto &tensor : m_mpsTensors_d) {
       HANDLE_CUDA_ERROR(cudaFree(tensor.deviceData));
