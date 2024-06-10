@@ -319,6 +319,34 @@ private:
 };
 } // namespace
 
+namespace {
+class CustomOpFinder : public clang::RecursiveASTVisitor<CustomOpFinder> {
+
+protected:
+  std::map<std::string, clang::FunctionDecl *> customOperationsMap;
+
+public:
+  std::map<std::string, clang::FunctionDecl *> &getCustomOpMap() {
+    return customOperationsMap;
+  }
+
+  bool VisitFunctionDecl(clang::FunctionDecl *FuncDecl) {
+    if (auto attr = FuncDecl->getAttr<clang::AnnotateAttr>()) {
+      if (attr->getAnnotation().str() == "user_custom_quantum_operation") {
+        StringRef funcName;
+        if (auto *id = FuncDecl->getIdentifier())
+          funcName = id->getName();
+        if (funcName.ends_with("_generator")) {
+          auto customOpName = funcName.split("_generator").first.str();
+          customOperationsMap[customOpName] = FuncDecl;
+        }
+      }
+    }
+    return true;
+  }
+};
+} // namespace
+
 #ifndef NDEBUG
 namespace cudaq::details {
 bool QuakeBridgeVisitor::pushValue(Value v) {
@@ -512,13 +540,16 @@ void ASTBridgeAction::ASTBridgeConsumer::HandleTranslationUnit(
     std::exit(1);
   }
 
+  CustomOpFinder cof;
+  cof.TraverseDecl(astContext.getTranslationUnitDecl());
+
   // If no errors, then proceed to lowering the kernels.
   llvm::SmallVector<clang::Decl *> reachableFuncs =
       listReachableFunctions(callGraphBuilder.getRoot());
   auto *ctx = module->getContext();
   details::QuakeBridgeVisitor visitor(
       &astContext, ctx, builder, module.get(), symbol_table, functionsToEmit,
-      reachableFuncs, cxx_mangled_kernel_names, ci, mangler);
+      reachableFuncs, cxx_mangled_kernel_names, ci, mangler, cof.getCustomOpMap());
 
   // First generate declarations for all kernels.
   bool ok = true;

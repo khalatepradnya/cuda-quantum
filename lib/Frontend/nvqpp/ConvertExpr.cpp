@@ -1935,6 +1935,17 @@ bool QuakeBridgeVisitor::VisitCallExpr(clang::CallExpr *x) {
       return pushValue(call.getResult(0));
     }
 
+    if (customOperationsMap.size() > 0) {
+      auto it = customOperationsMap.find(funcName.str());
+      if (it != customOperationsMap.end()) {
+        auto *generatorFD = it->second;
+        // generatorFD->get
+        return buildOp<quake::UnitaryOp>(builder, loc, args, negations,
+                                         reportNegateError, isAdjoint,
+                                         isControl);
+      } 
+    }
+
     TODO_loc(loc, "unknown function, " + funcName + ", in cudaq namespace");
   } // end in cudaq namespace
 

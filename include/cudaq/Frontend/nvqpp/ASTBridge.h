@@ -151,11 +151,12 @@ public:
                               llvm::ArrayRef<clang::Decl *> reachableFuncs,
                               MangledKernelNamesMap &namesMap,
                               clang::CompilerInstance &ci,
-                              clang::ItaniumMangleContext *mangler)
+                              clang::ItaniumMangleContext *mangler,
+                              std::map<std::string, clang::FunctionDecl *> customOps)
       : astContext(astCtx), mlirContext(mlirCtx), builder(bldr), module(module),
         symbolTable(symTab), functionsToEmit(funcsToEmit),
         reachableFunctions(reachableFuncs), namesMap(namesMap),
-        compilerInstance(ci), mangler(mangler) {}
+        compilerInstance(ci), mangler(mangler), customOperationsMap(customOps) {}
 
   /// `nvq++` renames quantum kernels to differentiate them from classical C++
   /// code. This renaming is done on function names. \p tag makes it easier
@@ -597,6 +598,7 @@ private:
   clang::ItaniumMangleContext *mangler;
   std::string loweredFuncName;
   llvm::SmallVector<mlir::Value> negations;
+  std::map<std::string, clang::FunctionDecl *> customOperationsMap;
 
   //===--------------------------------------------------------------------===//
   // Type traversals
