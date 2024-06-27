@@ -30,6 +30,7 @@
 #include "runtime/mlir/py_register_dialects.h"
 #include "utils/LinkedLibraryHolder.h"
 #include "utils/OpaqueArguments.h"
+#include "cudaq/qis/managers/photonics/photonics_qis.h"
 
 #include "mlir/Bindings/Python/PybindAdaptors.h"
 #include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
@@ -161,6 +162,11 @@ PYBIND11_MODULE(_quakeDialects, m) {
                     py::arg("bs_angles"), py::arg("ps_angles"),
                     py::arg("input_state"), py::arg("loop_lengths"),
                     py::arg("n_samples") = 10000);
+
+  auto photonicsSubmodule = cudaqRuntime.def_submodule("photonics");
+  // photonicsSubmodule.def("qudits", &cudaq::qvector<std::size_t>, py_arg);
+  photonicsSubmodule.def("plus", &cudaq::plus<std::size_t>, "[Documentation TODO]",
+                         py::arg("q"));
 
   cudaqRuntime.def("cloneModule",
                    [](MlirModule mod) { return wrap(unwrap(mod).clone()); });
