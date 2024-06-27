@@ -31,6 +31,7 @@
 #include "runtime/mlir/py_register_dialects.h"
 #include "utils/LinkedLibraryHolder.h"
 #include "utils/OpaqueArguments.h"
+#include "cudaq/qis/managers/photonics/photonics_qis.h"
 
 #include "mlir/Bindings/Python/PybindAdaptors.h"
 #include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
