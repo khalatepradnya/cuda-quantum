@@ -13,11 +13,11 @@ cudaq.set_target("photonics")
 
 @cudaq.photonics.kernel
 def photonicsKernel():
-    qutrits = cudaq.photonics.qudits(level=3, count=2)
-    cudaq.photonics.plus(qutrits[0])
-    cudaq.photonics.plus(qutrits[1])
-    cudaq.photonics.plus(qutrits[1])
-    cudaq.photonics.mz(qutrits)
+    qutrits = qudits(level=3, count=2) #for given kernel, number of levels should be constant
+    plus(qutrits[0])
+    plus(qutrits[1])
+    plus(qutrits[1])
+    mz(qutrits)
 
 
 counts = cudaq.photonics.sample(photonicsKernel)

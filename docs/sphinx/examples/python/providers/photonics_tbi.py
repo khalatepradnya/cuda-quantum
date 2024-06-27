@@ -54,7 +54,7 @@ def TBI(parameters: TBIParameters):
 
     cudaq.photonics.mz(quds)
 
-
+#numpy linspace
 def LinearSpacedArray(xs, min, max, N):
     h = (max - min) / (N - 1)
     val = min
