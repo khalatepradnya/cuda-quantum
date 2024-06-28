@@ -151,12 +151,14 @@ public:
       llvm::ArrayRef<clang::Decl *> reachableFuncs,
       MangledKernelNamesMap &namesMap, clang::CompilerInstance &ci,
       clang::ItaniumMangleContext *mangler,
-      llvm::SmallVector<llvm::StringRef> &customOperations)
+      llvm::SmallVector<llvm::StringRef> &customOperations,
+      std::unordered_map<std::string, std::string> &customUnitaries)
       : astContext(astCtx), mlirContext(mlirCtx), builder(bldr), module(module),
         symbolTable(symTab), functionsToEmit(funcsToEmit),
         reachableFunctions(reachableFuncs), namesMap(namesMap),
         compilerInstance(ci), mangler(mangler),
-        customOperationNames(customOperations) {}
+        customOperationNames(customOperations),
+        customUnitaries(customUnitaries) {}
 
   /// `nvq++` renames quantum kernels to differentiate them from classical C++
   /// code. This renaming is done on function names. \p tag makes it easier
@@ -599,6 +601,7 @@ private:
   std::string loweredFuncName;
   llvm::SmallVector<mlir::Value> negations;
   llvm::SmallVector<mlir::StringRef> &customOperationNames;
+  std::unordered_map<std::string, std::string> &customUnitaries;
 
   //===--------------------------------------------------------------------===//
   // Type traversals
@@ -687,6 +690,8 @@ public:
 
     // Keep track of user custom operation names.
     llvm::SmallVector<llvm::StringRef> customOperationNames;
+
+    std::unordered_map<std::string, std::string> customUnitaries;
 
     /// Add a placeholder definition to the module in \p visitor for the
     /// function, \p funcDecl. This is used for adding the host-side function

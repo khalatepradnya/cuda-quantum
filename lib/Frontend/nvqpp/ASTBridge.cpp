@@ -151,12 +151,14 @@ namespace {
 class QPUCodeFinder : public clang::RecursiveASTVisitor<QPUCodeFinder> {
 public:
   using Base = clang::RecursiveASTVisitor<QPUCodeFinder>;
-  explicit QPUCodeFinder(cudaq::EmittedFunctionsCollection &funcsToEmit,
-                         clang::CallGraph &cgb,
-                         clang::ItaniumMangleContext *mangler,
-                         SmallVector<StringRef> &customOperations)
+  explicit QPUCodeFinder(
+      cudaq::EmittedFunctionsCollection &funcsToEmit, clang::CallGraph &cgb,
+      clang::ItaniumMangleContext *mangler,
+      SmallVector<StringRef> &customOperations,
+      std::unordered_map<std::string, std::string> &customUnitaries)
       : functionsToEmit(funcsToEmit), callGraphBuilder(cgb), mangler(mangler),
-        customOperationNames(customOperations) {}
+        customOperationNames(customOperations),
+        customUnitaries(customUnitaries) {}
 
   /// Add a kernel to the list of kernels to process.
   void processQpu(std::string &&kernelName, const clang::FunctionDecl *f) {
@@ -230,6 +232,45 @@ public:
           customOperationNames.push_back(func->getName());
           return true;
         }
+      /// Look for "unitary" class method for custom operations; Refer to the
+      /// 'CUDAQ_REGISTER_OPERATION' macro in 'qubit_qis.h'
+      if (func->getNameAsString() == "unitary") {
+        if (isa<clang::CXXMethodDecl>(func)) {
+          auto parentName = cast<clang::CXXRecordDecl>(func->getParent())
+                                ->getQualifiedNameAsString();
+          const std::string prefix = "cudaq::";
+          const std::string suffix = "_operation";
+          if (parentName.ends_with(suffix) && parentName.starts_with(prefix)) {
+            auto customOpName =
+                StringRef(parentName).split(prefix).second.split(suffix).first;
+            auto compoundStmt =
+                cast<clang::CompoundStmt>(func->getDefinition()->getBody());
+            for (clang::Stmt::child_iterator it = compoundStmt->child_begin(),
+                                             end = compoundStmt->child_end();
+                 it != end; ++it) {
+              if (const clang::ReturnStmt *ret =
+                      dyn_cast<clang::ReturnStmt>(*it)) {
+                auto retVal = ret->getRetValue();
+
+                auto &SrcManager = mangler->getASTContext().getSourceManager();
+                clang::LangOptions LangOpt;
+                auto start = SrcManager.getSpellingLoc(retVal->getBeginLoc());
+                auto end = SrcManager.getSpellingLoc(retVal->getEndLoc());
+                clang::SourceLocation endToken(
+                    clang::Lexer::getLocForEndOfToken(end, 0, SrcManager,
+                                                      LangOpt));
+                auto retSource =
+                    std::string(SrcManager.getCharacterData(start),
+                                SrcManager.getCharacterData(endToken) -
+                                    SrcManager.getCharacterData(start));
+
+                customUnitaries[customOpName.str()] = retSource;
+                return true;
+              }
+            }
+          }
+        }
+      }
       if (cudaq::ASTBridgeAction::ASTBridgeConsumer::isQuantum(func)) {
         quantumTypesNotAllowed = false;
         // Run semantics checks on the kernel class.
@@ -319,6 +360,8 @@ private:
   clang::CallGraph &callGraphBuilder;
   clang::ItaniumMangleContext *mangler;
   SmallVector<StringRef> &customOperationNames;
+  std::unordered_map<std::string, std::string> &customUnitaries;
+
   // A class that is being visited. Need to run semantics checks on it if and
   // only if it has a quantum kernel.
   const clang::CXXRecordDecl *checkedClass = nullptr;
@@ -524,10 +567,10 @@ void ASTBridgeAction::ASTBridgeConsumer::HandleTranslationUnit(
   llvm::SmallVector<clang::Decl *> reachableFuncs =
       listReachableFunctions(callGraphBuilder.getRoot());
   auto *ctx = module->getContext();
-  details::QuakeBridgeVisitor visitor(&astContext, ctx, builder, module.get(),
-                                      symbol_table, functionsToEmit,
-                                      reachableFuncs, cxx_mangled_kernel_names,
-                                      ci, mangler, customOperationNames);
+  details::QuakeBridgeVisitor visitor(
+      &astContext, ctx, builder, module.get(), symbol_table, functionsToEmit,
+      reachableFuncs, cxx_mangled_kernel_names, ci, mangler,
+      customOperationNames, customUnitaries);
 
   // First generate declarations for all kernels.
   bool ok = true;
@@ -597,7 +640,7 @@ void ASTBridgeAction::ASTBridgeConsumer::HandleTranslationUnit(
 bool ASTBridgeAction::ASTBridgeConsumer::HandleTopLevelDecl(
     clang::DeclGroupRef dg) {
   QPUCodeFinder finder(functionsToEmit, callGraphBuilder, mangler,
-                       customOperationNames);
+                       customOperationNames, customUnitaries);
   // Loop over all decls, saving the function decls that are quantum kernels.
   for (const auto *decl : dg)
     finder.TraverseDecl(const_cast<clang::Decl *>(decl));

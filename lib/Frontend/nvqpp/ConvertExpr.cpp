@@ -12,6 +12,7 @@
 #include "cudaq/Optimizer/Builder/Intrinsics.h"
 #include "cudaq/Optimizer/Dialect/CC/CCOps.h"
 #include "cudaq/Optimizer/Dialect/Quake/QuakeOps.h"
+#include "cudaq/Support/SmallVector.h"
 #include "llvm/Support/Debug.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 
@@ -1630,8 +1631,84 @@ bool QuakeBridgeVisitor::VisitCallExpr(clang::CallExpr *x) {
         }
         return count;
       }();
-      auto srefAttr = SymbolRefAttr::get(
-          StringAttr::get(builder.getContext(), genFuncName));
+      mlir::FlatSymbolRefAttr srefAttr;
+      if (0 == paramCount) {
+        // get the raw unitary string
+        auto inputUnitary = StringRef(customUnitaries[funcName.str()]);
+        inputUnitary = inputUnitary.trim();
+        inputUnitary.consume_front("{");
+        inputUnitary.consume_back("}");
+        // split
+        SmallVector<StringRef> elements;
+        inputUnitary.split(elements, ",");
+
+        const unsigned int powTwo = (1UL << targetCount);
+        const unsigned int matrixSize = powTwo * powTwo;
+
+        std::vector<std::complex<double>> outputUnitary(
+            matrixSize, std::complex<double>(0.0, 0.0));
+
+        for (size_t i = 0; i < elements.size(); i++) {
+          elements[i] = elements[i].trim();
+          elements[i].consume_front("(");
+          elements[i].consume_back(")");
+          auto parts = elements[i].split("+");
+
+          std::string real = "0.0", imag = "0.0";
+          // TODO: Handle M_PI like values, also expressions
+          if ("" != parts.second) {
+            // which is imaginary part?
+            if (parts.first.contains("i")) {
+              imag = parts.first.trim("i").str();
+              real = parts.second.str();
+            } else if (parts.second.contains("i")) {
+              real = parts.first.str();
+              imag = parts.second.trim("i").str();
+            }
+          } else {
+            // only one part
+            if (parts.first.contains("i")) {
+              imag = parts.first.trim("i").str();              
+            } else {
+              real = parts.first.str();
+            }
+          }
+          if ("" == imag) { imag = "1.0"; }
+          if ("-" == imag) { imag = "-1.0"; }
+          
+          outputUnitary[i] =
+              std::complex<double>(std::stod(real), std::stod(imag));
+        }
+
+        std::string globalName = funcName.str() + ".generator";
+        auto existingOp = symbolTable.lookup(globalName);
+
+        if (!(existingOp)) {
+
+          SmallVector<Attribute> arrayAttrList;
+          for (auto el : outputUnitary) {
+            ArrayRef<double> values({el.real(), el.imag()});
+            arrayAttrList.push_back(
+                DenseF64ArrayAttr::get(builder.getContext(), values));
+          }
+
+          auto complexType = ComplexType::get(builder.getF64Type());
+          auto globalTy = cc::ArrayType::get(builder.getContext(), complexType,
+                                             arrayAttrList.size());
+          auto insertPoint = builder.saveInsertionPoint();
+          builder.setInsertionPointToEnd(module.getBody());
+          builder.create<cc::GlobalOp>(
+              loc, globalTy, globalName,
+              ArrayAttr::get(builder.getContext(), arrayAttrList),
+              /*constant=*/true, /*external*/ false);
+          builder.restoreInsertionPoint(insertPoint);
+        }
+        srefAttr =
+            mlir::FlatSymbolRefAttr::get(builder.getContext(), globalName);
+      } else {
+        srefAttr = SymbolRefAttr::get(
+            StringAttr::get(builder.getContext(), genFuncName));
+      }
       ValueRange operands(args);
       assert(operands.size() >= 1 && "must be at least 1 operand");
       if ((operands.size() == 1) &&
