@@ -31,7 +31,6 @@
 #include "runtime/mlir/py_register_dialects.h"
 #include "utils/LinkedLibraryHolder.h"
 #include "utils/OpaqueArguments.h"
-#include "cudaq/qis/managers/photonics/photonics_qis.h"
 
 #include "mlir/Bindings/Python/PybindAdaptors.h"
 #include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
@@ -179,6 +178,21 @@ PYBIND11_MODULE(_quakeDialects, m) {
       "ORCA's backends",
       py::arg("input_state"), py::arg("loop_lengths"), py::arg("bs_angles"),
       py::arg("n_samples") = 10000);
+
+  auto photonicsSubmodule = cudaqRuntime.def_submodule("photonics");
+  photonicsSubmodule.def(
+      "applyOperation",
+      [](const std::string &name, std::vector<double> &params,
+         std::vector<std::vector<std::size_t>> &targets) {
+        std::vector<cudaq::QuditInfo> targetInfo;
+        for (auto t : targets) {
+          targetInfo.push_back(cudaq::QuditInfo(t[0], t[1]));
+        }
+        cudaq::getExecutionManager()->apply(name, params, {}, targetInfo, false,
+                                            cudaq::spin_op());
+      },
+      py::arg("name"), py::arg("params"), py::arg("targets"));
+
   cudaqRuntime.def("cloneModule",
                    [](MlirModule mod) { return wrap(unwrap(mod).clone()); });
   cudaqRuntime.def("isTerminator", [](MlirOperation op) {

@@ -8,7 +8,8 @@
 
 // Compile and run with:
 // ```
-// nvq++ --target photonics photonics_tbi.cpp -o tbi.x && CUDAQ_LOG_LEVEL=info ./tbi.x
+// nvq++ --target photonics photonics_tbi.cpp -o tbi.x
+// CUDAQ_LOG_LEVEL=info ./tbi.x
 // ```
 
 #include "cudaq.h"

@@ -132,7 +132,7 @@ testing = cudaq_runtime.testing
 
 # target-specific
 orca = cudaq_runtime.orca
-
+from .photonics import photonics_kernel
 
 def synthesize(kernel, *args):
     # Compile if necessary, no-op if already compiled

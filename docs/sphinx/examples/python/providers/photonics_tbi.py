@@ -34,27 +34,28 @@ class TBIParameters:
     n_samples: int = 1000000
 
 
-@cudaq.photonics.kernel
+@cudaq.photonics_kernel(level=d)
 def TBI(parameters: TBIParameters):
     bs_angles = parameters.bs_angles
     ps_angles = parameters.ps_angles
 
-    quds = cudaq.photonics.qudits(level=d, count=n_modes)
+    quds = cudaq.qvector(n_modes)
 
     for i in range(n_modes):
         for _ in range(input_state[i]):
-            cudaq.photonics.plus(quds[i])
+            plus(quds[i])
 
     c = 0
     for ll in range(loop_lengths):
         for i in range(n_modes - ll):
-            cudaq.photonics.beam_splitter(quds[i], quds[i + ll], bs_angles[c])
-            cudaq.photonics.phase_shift(quds[i], ps_angles[c])
+            beam_splitter(quds[i], quds[i + ll], bs_angles[c])
+            phase_shift(quds[i], ps_angles[c])
             c += 1
 
-    cudaq.photonics.mz(quds)
+    mz(quds)
 
-#numpy linspace
+
+# Repalce with `numpy.linspace`
 def LinearSpacedArray(xs, min, max, N):
     h = (max - min) / (N - 1)
     val = min
@@ -71,5 +72,5 @@ LinearSpacedArray(ps_angles, np.pi / 3, np.pi / 5, n_beamsplitters)
 
 parameters = TBIParameters(bs_angles, ps_angles)
 
-counts = cudaq.photonics.sample(1000000, TBI, parameters)
+counts = cudaq.sample(1000000, TBI, parameters)
 counts.dump()
