@@ -39,12 +39,29 @@ def plus(qudit):
                                            [[globalQuditLevel, qubitId]])
 
 
-def mz(qudit):
-    qubitId = processQubitIds("mz", qudit)[0]
-    res = cudaq_runtime.measure(qubitId)
-    return res
+def phase_shift(qudit, phi):
+    global globalQuditLevel
+    op_name = "phaseShiftGate"
+    qubitId = processQubitIds(op_name, qudit)[0]
+    cudaq_runtime.photonics.applyOperation(op_name, [phi],
+                                           [[globalQuditLevel, qubitId]])
 
-# TODO: Support 'broadcast' operations
+
+def beam_splitter(q, r, theta):
+    global globalQuditLevel
+    op_name = "beamSplitterGate"
+    qId = processQubitIds(op_name, q)[0]
+    rId = processQubitIds(op_name, r)[0]
+    cudaq_runtime.photonics.applyOperation(
+        op_name, [theta], [[globalQuditLevel, qId], [globalQuditLevel, rId]])
+
+
+# TODO: Check 'broadcast'
+def mz(qudits):
+    qubitIds = processQubitIds("mz", qudits)
+    if len(qubitIds) == 1:
+        return cudaq_runtime.measure(qubitIds[0])
+    return [cudaq_runtime.measure(qubitIds[i]) for i in qubitIds]
 
 
 class PhotonicsKernelDecorator(object):
@@ -56,8 +73,9 @@ class PhotonicsKernelDecorator(object):
         globalQuditLevel = level
 
         self.kernelFunction.__globals__['plus'] = plus
+        self.kernelFunction.__globals__['phase_shift'] = phase_shift
+        self.kernelFunction.__globals__['beam_splitter'] = beam_splitter
         self.kernelFunction.__globals__['mz'] = mz
-        ## TODO: Add remaining gates
 
     def __call__(self, *args):
         return self.kernelFunction(*args)
