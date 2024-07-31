@@ -17,22 +17,3 @@ bool cudaq::__nvqpp__MeasureResultBoolConversion(int result) {
     ctx->registerNames.push_back("");
   return result == 1;
 }
-
-namespace cudaq {
-static ExecutionManager *execution_manager;
-inline static constexpr std::string_view GetExecutionManagerSymbol =
-    "getExecutionManager";
-
-void setExecutionManagerInternal(ExecutionManager *em) {
-  cudaq::info("external caller setting the execution manager.");
-  execution_manager = em;
-}
-
-ExecutionManager *getExecutionManagerInternal() {
-  if (execution_manager)
-    return execution_manager;
-  execution_manager = cudaq::getUniquePluginInstance<ExecutionManager>(
-      GetExecutionManagerSymbol);
-  return execution_manager;
-}
-} // namespace cudaq

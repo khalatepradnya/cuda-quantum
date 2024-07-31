@@ -180,6 +180,11 @@ PYBIND11_MODULE(_quakeDialects, m) {
       py::arg("n_samples") = 10000);
 
   auto photonicsSubmodule = cudaqRuntime.def_submodule("photonics");
+  // photonicsSubmodule.def(
+  //     "qvector",
+  //     [](const std::string &name, const std::size_t size,
+  //        const std::size_t level) { cudaq::qvector<level> name(size); },
+  //     py::arg("name"), py::arg("size"), py::arg("level)"));
   photonicsSubmodule.def(
       "applyOperation",
       [](const std::string &name, std::vector<double> &params,
