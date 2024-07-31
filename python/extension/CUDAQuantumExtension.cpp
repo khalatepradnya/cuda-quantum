@@ -188,8 +188,8 @@ PYBIND11_MODULE(_quakeDialects, m) {
         for (auto t : targets) {
           targetInfo.push_back(cudaq::QuditInfo(t[0], t[1]));
         }
-        cudaq::getExecutionManager()->apply(name, params, {}, targetInfo, false,
-                                            cudaq::spin_op());
+        cudaq::get_execution_manager().apply(name, params, {}, targetInfo,
+                                             false, cudaq::spin_op());
       },
       py::arg("name"), py::arg("params"), py::arg("targets"));
 

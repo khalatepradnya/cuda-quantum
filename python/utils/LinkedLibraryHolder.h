@@ -24,6 +24,8 @@ namespace cudaq {
 
 class quantum_platform;
 
+class ExecutionManager;
+
 /// @brief A RuntimeTarget encapsulates an available
 /// backend simulator and quantum_platform for CUDA-Q
 /// kernel execution.
@@ -83,6 +85,9 @@ public:
 
   /// @brief Return the registered quantum_platform with the given name.
   quantum_platform *getPlatform(const std::string &name);
+
+  /// @brief Return the registered execution manager for the given target
+  ExecutionManager *getExecutionManager(const std::string &name);
 
   /// @brief Return the available runtime target with given name.
   /// Throws an exception if no target available with that name.

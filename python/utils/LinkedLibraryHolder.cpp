@@ -27,6 +27,8 @@ void __nvqir__setCircuitSimulator(nvqir::CircuitSimulator *);
 namespace cudaq {
 void setQuantumPlatformInternal(quantum_platform *p);
 
+void setExecutionManagerInternal(ExecutionManager *em);
+
 static constexpr const char PLATFORM_LIBRARY[] = "PLATFORM_LIBRARY=";
 static constexpr const char NVQIR_SIMULATION_BACKEND[] =
     "NVQIR_SIMULATION_BACKEND=";
@@ -391,6 +393,22 @@ LinkedLibraryHolder::getPlatform(const std::string &platformName) {
       std::string("getQuantumPlatform_") + platformName);
 }
 
+ExecutionManager *
+LinkedLibraryHolder::getExecutionManager(const std::string &targetName) {
+  if (targets.find(targetName) == targets.end())
+    throw std::runtime_error("Invalid target requested: " + targetName);
+
+  if (targetName == "photonics") {
+    std::filesystem::path libPath =
+        cudaqLibPath / fmt::format("libcudaq-em-photonics.{}", libSuffix);
+    return getUniquePluginInstance<ExecutionManager>(
+        "getExecutionManager_photonics", libPath.c_str());
+  }
+
+  return getUniquePluginInstance<ExecutionManager>(
+      "getExecutionManager_default");
+}
+
 void LinkedLibraryHolder::resetTarget() { setTarget(defaultTarget); }
 
 RuntimeTarget LinkedLibraryHolder::getTarget(const std::string &name) const {
@@ -472,6 +490,10 @@ void LinkedLibraryHolder::setTarget(
 
   platform->setTargetBackend(backendConfigStr);
   setQuantumPlatformInternal(platform);
+
+  auto *em = getExecutionManager(targetName);
+  setExecutionManagerInternal(em);
+
   currentTarget = targetName;
 }
 

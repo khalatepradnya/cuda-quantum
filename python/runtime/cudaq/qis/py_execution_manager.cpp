@@ -47,8 +47,8 @@ void bindExecutionManager(py::module &mod) {
   mod.def(
       "measure",
       [](std::size_t id, const std::string &regName) {
-        return cudaq::getExecutionManager()->measure(cudaq::QuditInfo(2, id),
-                                                     regName);
+        return cudaq::get_execution_manager().measure(cudaq::QuditInfo(2, id),
+                                                      regName);
       },
       py::arg("qubit"), py::arg("register_name") = "");
 }
