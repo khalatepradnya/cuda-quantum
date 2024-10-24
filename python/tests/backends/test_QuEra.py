@@ -7,9 +7,12 @@
 # ============================================================================ #
 
 import cudaq
+
+import json
 import numpy as np
 import os
 import pytest
+
 from multiprocessing import Process
 from network_utils import check_server_connection
 
@@ -27,7 +30,7 @@ port = 62444
 def startUpMockServer():
     os.environ["QUERA_API_KEY"] = "00000000000000000000000000000000"
     # Set the targeted QPU
-    cudaq.set_target('quera', machine='aquila')
+    cudaq.set_target('quera')
     # Launch the Mock Server
     p = Process(target=startServer, args=(port,))
     p.start()
@@ -40,44 +43,56 @@ def startUpMockServer():
     p.terminate()
 
 
-def test_ahs_hello():
-    '''
-    Test based on
-    https://docs.aws.amazon.com/braket/latest/developerguide/braket-get-started-hello-ahs.html
-    '''
-    a = 5.7e-6
-    register = []
-    register.append(tuple(np.array([0.5, 0.5 + 1 / np.sqrt(2)]) * a))
-    register.append(tuple(np.array([0.5 + 1 / np.sqrt(2), 0.5]) * a))
-    register.append(tuple(np.array([0.5 + 1 / np.sqrt(2), -0.5]) * a))
-    register.append(tuple(np.array([0.5, -0.5 - 1 / np.sqrt(2)]) * a))
-    register.append(tuple(np.array([-0.5, -0.5 - 1 / np.sqrt(2)]) * a))
-    register.append(tuple(np.array([-0.5 - 1 / np.sqrt(2), -0.5]) * a))
-    register.append(tuple(np.array([-0.5 - 1 / np.sqrt(2), 0.5]) * a))
-    register.append(tuple(np.array([-0.5, 0.5 + 1 / np.sqrt(2)]) * a))
-
-    time_max = 4e-6  # seconds
-    time_ramp = 1e-7  # seconds
-    omega_max = 6300000.0  # rad / sec
-    delta_start = -5 * omega_max
-    delta_end = 5 * omega_max
-
-    # omega = ScalarOperator(lambda t: omega_max
-    #                        if time_ramp < t < time_max else 0.0)
-    # delta = ScalarOperator(lambda t: delta_end
-    #                        if time_ramp < t < time_max else delta_start)
-    # phi = ScalarOperator(0.0)
-
-    # # Schedule of time steps.
-    # steps = [0.0, time_ramp, time_max - time_ramp, time_max]
-    # schedule = Schedule(steps, ["t"])
-
-    # evolution_result = evolve(RydbergHamiltonian(atom_sites=register,
-    #                                              amplitude=omega,
-    #                                              phase=phi,
-    #                                              delta_global=delta),
-    #                           schedule=schedule)
-    # evolution_result.dump()
+def test_JSON_payload():
+    input = {
+        "setup": {
+            "ahs_register": {
+                "sites": [["0.0", "0.0"], ["0.0", "0.000003"],
+                          ["0.0", "0.000006"], ["0.000003", "0.0"],
+                          ["0.000003", "0.000003"], ["0.000003", "0.000003"],
+                          ["0.000003", "0.000006"]],
+                "filling": [1, 1, 1, 1, 1, 0, 0]
+            }
+        },
+        "hamiltonian": {
+            "drivingFields": [{
+                "amplitude": {
+                    "time_series": {
+                        "values": ["0.0", "25132700.0", "25132700.0", "0.0"],
+                        "times": ["0.0", "3E-7", "0.0000027", "0.000003"]
+                    },
+                    "pattern": "uniform"
+                },
+                "phase": {
+                    "time_series": {
+                        "values": ["0", "0"],
+                        "times": ["0.0", "0.000003"]
+                    },
+                    "pattern": "uniform"
+                },
+                "detuning": {
+                    "time_series": {
+                        "values": [
+                            "-125664000.0", "-125664000.0", "125664000.0",
+                            "125664000.0"
+                        ],
+                        "times": ["0.0", "3E-7", "0.0000027", "0.000003"]
+                    },
+                    "pattern": "uniform"
+                }
+            }],
+            "localDetuning": [{
+                "magnitude": {
+                    "time_series": {
+                        "values": ["-125664000.0", "125664000.0"],
+                        "times": ["0.0", "0.000003"]
+                    },
+                    "pattern": ["0.5", "1.0", "0.5", "0.5", "0.5", "0.5"]
+                }
+            }]
+        }
+    }
+    json_in = json.dumps(input)
 
 
 # leave for gdb debugging
