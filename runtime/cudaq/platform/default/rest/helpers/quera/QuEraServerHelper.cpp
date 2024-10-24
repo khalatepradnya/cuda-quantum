@@ -27,11 +27,9 @@ public:
 void QuEraServerHelper::initialize(BackendConfig config) {
   cudaq::info("Initializing QuEra via Amazon Braket Backend.");
 
-  // Fetch machine info before checking emulate because we want to be able to
-  // emulate specific machines.
+  // Hard-coded for now
+  auto machine = Aquila;
 
-  auto machine = getValueOrDefault(config, "machine", Aquila);
-  // check_machine_allowed(machine);
   config["machine"] = machine;
   config["target"] = machine;
   cudaq::info("Running on machine {}", machine);
