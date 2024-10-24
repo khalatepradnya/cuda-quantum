@@ -9,15 +9,15 @@
 #include "BraketServerHelper.h"
 
 namespace cudaq {
-  std::string get_from_config(BackendConfig config, const std::string &key,
+std::string get_from_config(BackendConfig config, const std::string &key,
                             const auto &missing_functor) {
-    const auto iter = config.find(key);
-    auto item = iter != config.end() ? iter->second : missing_functor();
-    std::transform(item.begin(), item.end(), item.begin(),
-                  [](auto c) { return std::tolower(c); });
-    return item;
-  }
-  void check_machine_allowed(const std::string &machine) {
+  const auto iter = config.find(key);
+  auto item = iter != config.end() ? iter->second : missing_functor();
+  std::transform(item.begin(), item.end(), item.begin(),
+                 [](auto c) { return std::tolower(c); });
+  return item;
+}
+void check_machine_allowed(const std::string &machine) {
   if (Machines.find(machine) == Machines.end()) {
     std::string allowed;
     for (const auto &machine : Machines)
@@ -43,11 +43,11 @@ void BraketServerHelper::initialize(BackendConfig config) {
 
   // Fetch machine info before checking emulate because we want to be able to
   // emulate specific machines.
-  
+
   auto machine = getValueOrDefault(config, "machine", SV1);
   check_machine_allowed(machine);
   config["machine"] = machine;
-  config["target"]  = machine;
+  config["target"] = machine;
   cudaq::info("Running on machine {}", machine);
 
   const auto emulate_it = config.find("emulate");
@@ -69,7 +69,7 @@ void BraketServerHelper::initialize(BackendConfig config) {
 
   // Move the passed config into the member variable backendConfig
   backendConfig = std::move(config);
-};
+}
 
 std::map<std::string, std::string>
 BraketServerHelper::generateRequestHeader() const {
@@ -118,8 +118,8 @@ BraketServerHelper::createJob(std::vector<KernelExecution> &circuitCodes) {
   // return the payload
   std::string baseUrl = "";
   return std::make_tuple(baseUrl + "job", headers, jobs);
-};
+}
 
-} // namespace cuda-q
+} // namespace cudaq
 
 CUDAQ_REGISTER_TYPE(cudaq::ServerHelper, cudaq::BraketServerHelper, braket)

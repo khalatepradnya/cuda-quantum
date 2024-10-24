@@ -32,8 +32,8 @@
 #include <aws/core/utils/logging/ConsoleLogSystem.h>
 #include <aws/core/utils/logging/LogLevel.h>
 
-#include "common/Logger.h"
 #include "BraketServerHelper.h"
+#include "common/Logger.h"
 
 #include <nlohmann/json.hpp>
 #include <regex>
@@ -68,9 +68,7 @@ public:
     std::cerr << "made a braket exec\n";
 
     // Aws::InitAPI(options);
-
   }
-
 
   ~BraketExecutor() {
     std::cerr << "destroy braket exec\n";
@@ -79,6 +77,7 @@ public:
   }
 
   /// @brief Execute the provided Braket task
-  details::future execute(std::vector<KernelExecution> &codesToExecute) override;
+  details::future
+  execute(std::vector<KernelExecution> &codesToExecute) override;
 };
-} // namespace cuda-q
+} // namespace cudaq

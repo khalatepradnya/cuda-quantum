@@ -6,4 +6,14 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
+target_sources(cudaq-rest-qpu PRIVATE QuEraServerHelper.cpp)
 add_target_config(quera)
+
+add_library(cudaq-serverhelper-quera SHARED QuEraServerHelper.cpp )
+target_link_libraries(cudaq-serverhelper-quera
+  PUBLIC 
+    cudaq-serverhelper-braket
+    cudaq-common 
+    fmt::fmt-header-only 
+)
+install(TARGETS cudaq-serverhelper-quera DESTINATION lib)

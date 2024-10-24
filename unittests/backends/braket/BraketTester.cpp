@@ -18,7 +18,7 @@
 std::string mockPort = "5000";
 std::string machine = "telegraph-8q";
 std::string backendStringTemplate =
-//    "braket;emulate;false;url;http://localhost:{};credentials;{};machine;{}";
+    //    "braket;emulate;false;url;http://localhost:{};credentials;{};machine;{}";
     "braket;emulate;false;url;http://localhost:{};credentials;{}";
 bool isValidExpVal(double value) {
   // give us some wiggle room while keep the tests fast
@@ -28,9 +28,10 @@ bool isValidExpVal(double value) {
 CUDAQ_TEST(BraketTester, checkSampleSync) {
   std::string home = std::getenv("HOME");
   std::string fileName = home + "/FakeCppBraket.config";
-  auto backendString = fmt::format(fmt::runtime(backendStringTemplate),
-//                                   mockPort, fileName, machine);
-                                   mockPort, fileName);
+  auto backendString = fmt::format(
+      fmt::runtime(backendStringTemplate),
+      //                                   mockPort, fileName, machine);
+      mockPort, fileName);
 
   auto &platform = cudaq::get_platform();
   platform.setTargetBackend(backendString);
