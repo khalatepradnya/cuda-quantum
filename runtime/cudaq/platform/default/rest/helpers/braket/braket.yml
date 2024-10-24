@@ -6,11 +6,11 @@ config:
   # Tell DefaultQuantumPlatform what QPU subtype to use
   platform-qpu: remote_rest
   # Add the rest-qpu library to the link list
-  link-libs: ["-lcudaq-braket", "-lcudaq-rest-qpu"]
+  link-libs: ["-lcudaq-rest-qpu"]
   # Tell NVQ++ to generate glue code to set the target backend name
   gen-target-backend: true
   # Define the lowering pipeline
-  platform-lowering-config: "const-prop-complex,canonicalize,cse,lift-array-value,state-prep,unitary-synthesis,canonicalize,apply-op-specialization,aggressive-early-inlining,expand-measurements,unrolling-pipeline,func.func(lower-to-cfg),canonicalize,func.func(multicontrol-decomposition)"
+  platform-lowering-config: "const-prop-complex,canonicalize,cse,lift-array-value,state-prep,unitary-synthesis,canonicalize,apply-op-specialization,aggressive-early-inlining,unrolling-pipeline,func.func(lower-to-cfg),canonicalize,func.func(multicontrol-decomposition),func.func(memtoreg{quantum=0})"
   # Tell the rest-qpu that we are generating OpenQASM 2.0.
   codegen-emission: qasm2
   # Library mode is only for simulators, physical backends must turn this off

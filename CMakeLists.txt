@@ -484,19 +484,21 @@ endif()
 #set(OPENSSL_ROOT_DIR "$ENV{OPENSSL_INSTALL_PREFIX}" CACHE STRING "" FORCE)
 #set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
 #message(STATUS "OpenSSL Root Dir: $ENV{OPENSSL_INSTALL_PREFIX}")
-#if (CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
-#  set(crypto_LIBRARY "$ENV{OPENSSL_INSTALL_PREFIX}/lib64/libcrypto.a" CACHE STRING "" FORCE)
-##  set(crypto_STATIC_LIBRARY "$ENV{OPENSSL_INSTALL_PREFIX}/lib64/libcrypto.a" CACHE STRING "" FORCE)
-#else()
-#  set(crypto_LIBRARY "$ENV{OPENSSL_INSTALL_PREFIX}/lib/libcrypto.a" CACHE STRING "" FORCE)
-##  set(crypto_STATIC_LIBRARY "$ENV{OPENSSL_INSTALL_PREFIX}/lib/libcrypto.a" CACHE STRING "" FORCE)
-#endif()
-#set(crypto_INCLUDE_DIR "$ENV{OPENSSL_INSTALL_PREFIX}/include" CACHE STRING "" FORCE)
+if (CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+  set(crypto_LIBRARY "$ENV{OPENSSL_INSTALL_PREFIX}/lib64/libcrypto.a" CACHE STRING "" FORCE)
+  ##  set(crypto_STATIC_LIBRARY "$ENV{OPENSSL_INSTALL_PREFIX}/lib64/libcrypto.a" CACHE STRING "" FORCE)
+else()
+  set(crypto_LIBRARY "$ENV{OPENSSL_INSTALL_PREFIX}/lib/libcrypto.a" CACHE STRING "" FORCE)
+  ##  set(crypto_STATIC_LIBRARY "$ENV{OPENSSL_INSTALL_PREFIX}/lib/libcrypto.a" CACHE STRING "" FORCE)
+endif()
+set(crypto_INCLUDE_DIR "$ENV{OPENSSL_INSTALL_PREFIX}/include" CACHE STRING "" FORCE)
 #set(CMAKE_COMPILE_WARNING_AS_ERROR OFF CACHE BOOL "" FORCE)
 #set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-#remove_definitions(-Werror)
-#add_subdirectory(tpls/aws-sdk-cpp)
-find_package(AWSSDK)
+# NOTE: if this find_package() call fails, first install AWS SDK by running:
+#   cd tpls/aws-sdk-cpp && cmake -DBUILD_ONLY="s3-crt;braket;sts" -DAUTORUN_UNIT_TESTS=OFF -DAWS_SDK_WARNINGS_ARE_ERRORS=OFF -DCURL_LIBRARY=/usr/local/curl/lib/libcurl.a -DCURL_INCLUDE_DIR=/usr/local/curl/include -Dcrypto_LIBRARY=$OPENSSL_INSTALL_PREFIX/lib64/libcrypto.a -Dcrypto_INCLUDE_DIR=$OPENSSL_INSTALL_PREFIX/include -DOPENSSL_ROOT_DIR=$OPENSSL_INSTALL_PREFIX -DENABLE_TESTING=OFF && make && make install
+# TODO: add the above to the build script so it doesn't need to be done manually.
+set(SERVICE_COMPONENTS braket s3-crt sts)
+find_package(AWSSDK REQUIRED COMPONENTS ${SERVICE_COMPONENTS})
 
 # Check for CUDA Support
 # ==============================================================================

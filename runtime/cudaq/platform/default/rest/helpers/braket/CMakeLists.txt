@@ -12,8 +12,9 @@ target_sources(cudaq-rest-qpu PRIVATE BraketExecutor.cpp BraketServerHelper.cpp)
 add_target_config(braket)
 add_library(cudaq-serverhelper-braket SHARED BraketExecutor.cpp BraketServerHelper.cpp)
 
-target_link_libraries(cudaq-serverhelper-braket 
-aws-cpp-sdk-braket aws-cpp-sdk-s3-crt aws-cpp-sdk-sts aws-cpp-sdk-core
-cudaq-common fmt::fmt-header-only)
+target_link_libraries(cudaq-serverhelper-braket
+    cudaq-common
+    fmt::fmt-header-only
+    ${AWSSDK_LINK_LIBRARIES})
 
 install(TARGETS cudaq-serverhelper-braket DESTINATION lib)
