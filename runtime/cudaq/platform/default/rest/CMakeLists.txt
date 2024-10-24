@@ -28,7 +28,12 @@ target_link_libraries(cudaq-rest-qpu
     MLIRTranslateLib
     fmt::fmt-header-only 
     cudaq 
-    cudaq-platform-default)
+    cudaq-platform-default
+    aws-cpp-sdk-braket
+    aws-cpp-sdk-s3-crt
+    aws-cpp-sdk-sts
+    aws-cpp-sdk-core
+)
 
 install(TARGETS cudaq-rest-qpu DESTINATION lib)
 
