@@ -7,7 +7,7 @@
  ******************************************************************************/
 
 #include "CUDAQTestUtils.h"
-#include "../../runtime/cudaq/platform/default/rest/helpers/quera/ahs_program.h"
+#include "../../runtime/cudaq/platform/quera/ahs_program.h"
 #include <gtest/gtest.h>
 
 namespace {

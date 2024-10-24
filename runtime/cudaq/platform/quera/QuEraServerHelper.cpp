@@ -6,7 +6,7 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-#include "../braket/BraketServerHelper.h"
+#include "../default/rest/helpers/braket/BraketServerHelper.h"
 
 namespace cudaq {
 class QuEraServerHelper : public cudaq::BraketServerHelper {
