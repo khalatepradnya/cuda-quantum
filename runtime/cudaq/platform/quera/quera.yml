@@ -10,9 +10,9 @@ name: quera
 description: "CUDA-Q target for QuEra."
 config:
   # Tell DefaultQuantumPlatform what QPU subtype to use
-  platform-qpu: remote_rest
-  # Add the rest-qpu library to the link list
-  link-libs: ["-lcudaq-rest-qpu"]
+  platform-qpu: quera
+  # Add the quera-qpu library to the link list
+  link-libs: ["-lcudaq-quera-qpu"]
   # Library mode is only for simulators, physical backends must turn this off
   library-mode: false
 
