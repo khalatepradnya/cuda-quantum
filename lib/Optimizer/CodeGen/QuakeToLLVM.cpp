@@ -1399,6 +1399,11 @@ public:
     if (!globalOp)
       return op.emitOpError("global not found for custom op");
 
+    // Retrieve the unitary matrix for its dimensions
+    auto matrix = cudaq::opt::factory::readGlobalConstantArray(globalOp);
+    Value matrixSize =
+        rewriter.create<arith::ConstantIntOp>(loc, matrix.size(), 64);
+
     auto complex64Ty =
         typeConverter->convertType(ComplexType::get(rewriter.getF64Type()));
     auto complex64PtrTy = LLVM::LLVMPointerType::get(complex64Ty);
@@ -1413,14 +1418,16 @@ public:
     FlatSymbolRefAttr customSymbolRef =
         cudaq::opt::factory::createLLVMFunctionSymbol(
             qirFunctionName, LLVM::LLVMVoidType::get(context),
-            {complex64PtrTy, cudaq::opt::getArrayType(context),
+            {complex64PtrTy, rewriter.getI64Type(),
+             cudaq::opt::getArrayType(context),
              cudaq::opt::getArrayType(context),
              LLVM::LLVMPointerType::get(rewriter.getI8Type())},
             parentModule);
 
     rewriter.replaceOpWithNewOp<LLVM::CallOp>(
         op, TypeRange{}, customSymbolRef,
-        ValueRange{unitaryData, controlArr, targetArr, castedOpNameRef});
+        ValueRange{unitaryData, matrixSize, controlArr, targetArr,
+                   castedOpNameRef});
 
     return success();
   }

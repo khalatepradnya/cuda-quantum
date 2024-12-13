@@ -1816,21 +1816,16 @@ class PyASTBridge(ast.NodeVisitor):
             if node.func.id in globalRegisteredOperations:
                 unitary = globalRegisteredOperations[node.func.id]
                 numTargets = int(np.log2(np.sqrt(unitary.size)))
-
                 numValues = len(self.valueStack)
-                if numValues != numTargets:
+
+                if numTargets < numValues:
                     self.emitFatalError(
-                        f'invalid number of arguments ({numValues}) passed to {node.func.id} (requires {numTargets} arguments)',
+                        f'too many arguments ({numValues}) passed to {node.func.id} (requires {numTargets} arguments)',
                         node)
 
-                targets = [self.popValue() for _ in range(numTargets)]
+                targets = [self.popValue() for _ in range(numValues)]
                 targets.reverse()
-
-                for i, t in enumerate(targets):
-                    if not quake.RefType.isinstance(t.type):
-                        self.emitFatalError(
-                            f'invalid target operand {i}, broadcasting is not supported on custom operations.'
-                        )
+                self.checkControlAndTargetTypes([], targets)
 
                 globalName = f'{nvqppPrefix}{node.func.id}_generator_{numTargets}.rodata'
 
@@ -1840,13 +1835,66 @@ class PyASTBridge(ast.NodeVisitor):
                         gen_vector_of_complex_constant(self.loc, self.module,
                                                        globalName,
                                                        unitary.tolist())
-                quake.CustomUnitarySymbolOp(
-                    [],
-                    generator=FlatSymbolRefAttr.get(globalName),
-                    parameters=[],
-                    controls=[],
-                    targets=targets,
-                    is_adj=False)
+
+                if numTargets == 1:
+
+                    for quantumValue in targets:
+                        if quake.VeqType.isinstance(quantumValue.type):
+
+                            def bodyBuilder(iterVal):
+                                q = quake.ExtractRefOp(self.getRefType(),
+                                                       quantumValue,
+                                                       -1,
+                                                       index=iterVal).result
+                                quake.CustomUnitarySymbolOp(
+                                    [],
+                                    generator=FlatSymbolRefAttr.get(globalName),
+                                    parameters=[],
+                                    controls=[],
+                                    targets=[q],
+                                    is_adj=False)
+
+                            veqSize = quake.VeqSizeOp(self.getIntegerType(),
+                                                      quantumValue).result
+                            self.createInvariantForLoop(veqSize, bodyBuilder)
+                        elif quake.RefType.isinstance(quantumValue.type):
+                            quake.CustomUnitarySymbolOp(
+                                [],
+                                generator=FlatSymbolRefAttr.get(globalName),
+                                parameters=[],
+                                controls=[],
+                                targets=[quantumValue],
+                                is_adj=False)
+                    return
+
+                if numValues == numTargets:
+                    for i, t in enumerate(targets):
+                        if not quake.RefType.isinstance(t.type):
+                            self.emitFatalError(f'invalid target operand {i}')
+
+                    quake.CustomUnitarySymbolOp(
+                        [],
+                        generator=FlatSymbolRefAttr.get(globalName),
+                        parameters=[],
+                        controls=[],
+                        targets=targets,
+                        is_adj=False)
+
+                    return
+
+                if numValues == 1:
+                    if not quake.VeqType.isinstance(targets[0].type):
+                        self.emitFatalError(f'invalid target operand')
+                    # Let runtime check the size of qvector
+
+                    quake.CustomUnitarySymbolOp(
+                        [],
+                        generator=FlatSymbolRefAttr.get(globalName),
+                        parameters=[],
+                        controls=[],
+                        targets=targets,
+                        is_adj=False)
+
                 return
 
             # Handle the case where we are capturing an opaque kernel
@@ -2679,32 +2727,40 @@ class PyASTBridge(ast.NodeVisitor):
                 unitary = globalRegisteredOperations[node.func.value.id]
                 numTargets = int(np.log2(np.sqrt(unitary.size)))
                 numValues = len(self.valueStack)
-                targets = [self.popValue() for _ in range(numTargets)]
-                targets.reverse()
-
-                for i, t in enumerate(targets):
-                    if not quake.RefType.isinstance(t.type):
-                        self.emitFatalError(
-                            f'invalid target operand {i}, broadcasting is not supported on custom operations.'
-                        )
-
-                globalName = f'{nvqppPrefix}{node.func.value.id}_generator_{numTargets}.rodata'
-
-                currentST = SymbolTable(self.module.operation)
-                if not globalName in currentST:
-                    with InsertionPoint(self.module.body):
-                        gen_vector_of_complex_constant(self.loc, self.module,
-                                                       globalName,
-                                                       unitary.tolist())
-
-                negatedControlQubits = None
+                targets = []
                 controls = []
+                negatedControlQubits = None
                 is_adj = False
 
-                if node.func.attr == 'ctrl':
-                    controls = [
-                        self.popValue() for _ in range(numValues - numTargets)
-                    ]
+                if node.func.attr == 'adj':
+                    if numTargets < numValues:
+                        self.emitFatalError(
+                            f'too many arguments ({numValues}) passed to {node.func.id} (requires {numTargets} arguments)',
+                            node)
+                    is_adj = True
+                    targets = [self.popValue() for _ in range(numValues)]
+                elif node.func.attr == 'ctrl':
+                    if numTargets == 1:
+                        targets = [self.popValue()]
+                        controls = [
+                            self.popValue() for _ in range(numValues - 1)
+                        ]
+                    else:
+                        lastTarget = self.popValue()
+                        targets = [lastTarget]
+                        if quake.RefType.isinstance(lastTarget.type):
+                            targets.append([
+                                self.popValue() for _ in range(numTargets - 1)
+                            ])
+                            controls = [
+                                self.popValue()
+                                for _ in range(numValues - numTargets)
+                            ]
+                        elif quake.VeqType.isinstance(lastTarget.type):
+                            targets = [lastTarget]
+                            controls = [
+                                self.popValue() for _ in range(numValues - 1)
+                            ]
                     if not controls:
                         self.emitFatalError(
                             'controlled operation requested without any control argument(s).',
@@ -2717,10 +2773,62 @@ class PyASTBridge(ast.NodeVisitor):
                         negatedControlQubits = DenseBoolArrayAttr.get(
                             negCtrlBools)
                         self.controlNegations.clear()
-                if node.func.attr == 'adj':
-                    is_adj = True
-
+                targets.reverse()
                 self.checkControlAndTargetTypes(controls, targets)
+                globalName = f'{nvqppPrefix}{node.func.value.id}_generator_{numTargets}.rodata'
+                currentST = SymbolTable(self.module.operation)
+                if not globalName in currentST:
+                    with InsertionPoint(self.module.body):
+                        gen_vector_of_complex_constant(self.loc, self.module,
+                                                       globalName,
+                                                       unitary.tolist())
+                if numTargets == 1:
+                    for quantumValue in targets:
+                        if quake.VeqType.isinstance(quantumValue.type):
+
+                            def bodyBuilder(iterVal):
+                                q = quake.ExtractRefOp(self.getRefType(),
+                                                       quantumValue,
+                                                       -1,
+                                                       index=iterVal).result
+                                quake.CustomUnitarySymbolOp(
+                                    [],
+                                    generator=FlatSymbolRefAttr.get(globalName),
+                                    parameters=[],
+                                    controls=controls,
+                                    targets=targets,
+                                    is_adj=is_adj,
+                                    negated_qubit_controls=negatedControlQubits)
+
+                            veqSize = quake.VeqSizeOp(self.getIntegerType(),
+                                                      quantumValue).result
+                            self.createInvariantForLoop(veqSize, bodyBuilder)
+                        elif quake.RefType.isinstance(quantumValue.type):
+                            quake.CustomUnitarySymbolOp(
+                                [],
+                                generator=FlatSymbolRefAttr.get(globalName),
+                                parameters=[],
+                                controls=controls,
+                                targets=targets,
+                                is_adj=is_adj,
+                                negated_qubit_controls=negatedControlQubits)
+                    return
+
+                if numValues == numTargets:
+                    for i, t in enumerate(targets):
+                        if not quake.RefType.isinstance(t.type):
+                            self.emitFatalError(f'invalid target operand {i}')
+                    quake.CustomUnitarySymbolOp(
+                        [],
+                        generator=FlatSymbolRefAttr.get(globalName),
+                        parameters=[],
+                        controls=controls,
+                        targets=targets,
+                        is_adj=is_adj,
+                        negated_qubit_controls=negatedControlQubits)
+                    return
+
+                # Let runtime check the size of qvector
                 quake.CustomUnitarySymbolOp(
                     [],
                     generator=FlatSymbolRefAttr.get(globalName),

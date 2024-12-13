@@ -22,7 +22,6 @@ def do_something():
 def check_bell(entity):
     """Helper function to encapsulate checks for Bell pair"""
     counts = cudaq.sample(entity, shots_count=100)
-    counts.dump()
     assert len(counts) == 2
     assert '00' in counts and '11' in counts
 
@@ -96,14 +95,46 @@ def test_three_qubit_op():
         ]))
 
     @cudaq.kernel
-    def test_toffoli():
+    def using_qvector_refs():
         q = cudaq.qvector(3)
         x(q)
         toffoli(q[0], q[1], q[2])
 
-    counts = cudaq.sample(test_toffoli)
-    print(counts)
+    counts = cudaq.sample(using_qvector_refs)
     assert counts["110"] == 1000
+
+    @cudaq.kernel
+    def using_individual_qubits():
+        p = cudaq.qubit()
+        q = cudaq.qubit()
+        r = cudaq.qubit()
+        x(p)
+        x(q)
+        x(r)
+        toffoli(p, q, r)
+
+    counts = cudaq.sample(using_individual_qubits)
+    assert counts["110"] == 1000
+
+    @cudaq.kernel
+    def using_qvector():
+        q = cudaq.qvector(3)
+        x(q)
+        toffoli(q)
+
+    counts = cudaq.sample(using_qvector)
+    assert counts["110"] == 1000
+
+    @cudaq.kernel
+    def using_qvector_incorrect_size():
+        q = cudaq.qvector(2)
+        x(q)
+        toffoli(q)
+
+    with pytest.raises(ValueError) as e:
+        cudaq.sample(using_qvector_incorrect_size)
+    assert "The number of target qubit(s) does not match the custom operation matrix dimensions" in repr(
+        e)
 
 
 # NOTE: Ref - https://github.com/NVIDIA/cuda-quantum/issues/1925
@@ -149,7 +180,6 @@ def test_custom_adjoint():
         h(q)
 
     counts = cudaq.sample(kernel)
-    counts.dump()
     assert counts["1"] == 1000
 
 
@@ -238,9 +268,7 @@ def test_bug_2452():
         qubits = cudaq.qvector(2)
         custom_i(qubits)
 
-    with pytest.raises(RuntimeError) as error:
-        kernel1.compile()
-    assert 'broadcasting is not supported on custom operations' in repr(error)
+    kernel1.compile()
 
     cudaq.register_operation("custom_x", np.array([0, 1, 1, 0]))
 
@@ -263,10 +291,7 @@ def test_bug_2452():
         qubits = cudaq.qvector(2)
         custom_cz(qubits)
 
-    with pytest.raises(RuntimeError) as error:
-        cudaq.sample(kernel3)
-    assert 'invalid number of arguments (1) passed to custom_cz (requires 2 arguments)' in repr(
-        error)
+    cudaq.sample(kernel3)
 
 
 # leave for gdb debugging

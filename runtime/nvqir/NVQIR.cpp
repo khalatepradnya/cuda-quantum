@@ -611,32 +611,39 @@ void __quantum__rt__result_record_output(Result *r, int8_t *name) {
 }
 
 void __quantum__qis__custom_unitary(std::complex<double> *unitary,
-                                    Array *controls, Array *targets,
-                                    const char *name) {
+                                    std::size_t matrixSize, Array *controls,
+                                    Array *targets, const char *name) {
   auto ctrlsVec = arrayToVectorSizeT(controls);
   auto tgtsVec = arrayToVectorSizeT(targets);
   auto numQubits = tgtsVec.size();
+  std::size_t expectedTargets = std::log2(std::sqrt(matrixSize));
+  if (numQubits != expectedTargets)
+    throw std::invalid_argument("The number of target qubit(s) does not match "
+                                "the custom operation matrix dimensions");
   if (numQubits >= 64)
     throw std::invalid_argument("Too many qubits (>=64), not supported");
-  auto nToPowTwo = (1ULL << numQubits);
-  auto numElements = nToPowTwo * nToPowTwo;
   std::vector<std::complex<double>> unitaryMatrix(unitary,
-                                                  unitary + numElements);
+                                                  unitary + matrixSize);
   nvqir::getCircuitSimulatorInternal()->applyCustomOperation(
       unitaryMatrix, ctrlsVec, tgtsVec, name);
 }
 
 void __quantum__qis__custom_unitary__adj(std::complex<double> *unitary,
+                                         std::size_t matrixSize,
                                          Array *controls, Array *targets,
                                          const char *name) {
 
   auto ctrlsVec = arrayToVectorSizeT(controls);
   auto tgtsVec = arrayToVectorSizeT(targets);
   auto numQubits = tgtsVec.size();
+  std::size_t expectedTargets = std::log2(std::sqrt(matrixSize));
+  if (numQubits != expectedTargets)
+    throw std::invalid_argument("The number of target qubit(s) does not match "
+                                "the custom operation matrix dimensions");
   if (numQubits >= 64)
     throw std::invalid_argument("Too many qubits (>=64), not supported");
   auto nToPowTwo = (1ULL << numQubits);
-
+  // Compute the adjoint of custom matrix
   std::vector<std::vector<std::complex<double>>> unitaryConj2D;
   for (std::size_t r = 0; r < nToPowTwo; r++) {
     std::vector<std::complex<double>> row;
