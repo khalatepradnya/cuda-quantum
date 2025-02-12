@@ -7,6 +7,9 @@
 # ============================================================================ #
 from ..mlir._mlir_libs._quakeDialects import cudaq_runtime
 from .utils import __isBroadcast, __createArgumentSet
+from ..kernel.utils import nvqppPrefix
+from ..kernel.kernel_decorator import PyKernelDecorator
+from ..kernel.kernel_builder import PyKernel
 
 
 def __broadcastSample(kernel, *args, shots_count=0):
@@ -66,8 +69,15 @@ Returns:
     ctx = cudaq_runtime.ExecutionContext("sample", shots_count)
     cudaq_runtime.setExecutionContext(ctx)
 
-    if hasattr(kernel, 'metadata') and kernel.metadata.get(
-            'conditionalOnMeasure', False):
+    if isinstance(kernel, PyKernelDecorator):
+        kernel.compile()
+        for operation in kernel.module.body.operations:
+            if not hasattr(operation, 'name'):
+                continue
+            if nvqppPrefix + kernel.name == operation.name.value and 'qubitMeasurementFeedback' in operation.attributes:
+                ctx.hasConditionalsOnMeasureResults = True
+                break
+    elif isinstance(kernel, PyKernel) and kernel.conditionalOnMeasure:
         ctx.hasConditionalsOnMeasureResults = True
 
     platformSupportsConditionalFeedback = cudaq_runtime.supportsConditionalFeedback(
