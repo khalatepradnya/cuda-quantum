@@ -9,6 +9,7 @@
 #include "cudaq/algorithms/run.h"
 #include "common/ExecutionContext.h"
 #include "common/RecordLogDecoder.h"
+#include "common/RuntimeMLIR.h"
 #include "cudaq/simulators.h"
 #include "nvqir/CircuitSimulator.h"
 
@@ -47,6 +48,8 @@ cudaq::details::RunResultSpan cudaq::details::runTheKernel(
       platform.reset_exec_ctx();
     }
   }
+
+  auto dataLayout = cudaq::extractDataLayout(kernel_name);
 
   // 3. Pass the outputLog to the decoder (target-specific?)
   cudaq::RecordLogDecoder decoder;
