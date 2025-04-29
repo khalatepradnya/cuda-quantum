@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "RecordLogDecoder.h"
+#include "common/RuntimeMLIR.h"
 
 void cudaq::RecordLogDecoder::decode(const std::string &outputLog) {
   std::vector<std::string> lines = cudaq::split(outputLog, '\n');
@@ -166,6 +167,17 @@ void cudaq::RecordLogDecoder::preallocateArray() {
 
 void cudaq::RecordLogDecoder::preallocateTuple() {
   containerMeta.dataOffset = bufferHandler.getBufferSize();
+  if (!kernelName.empty()) {
+    auto dataLayout = cudaq::extractDataLayout(kernelName);
+    if (dataLayout.second.size() != containerMeta.tupleTypes.size())
+      throw std::runtime_error("Tuple size mismatch in kernel and label.");
+    for (size_t i = 0; i < containerMeta.tupleTypes.size(); ++i) {
+      auto ty = containerMeta.tupleTypes[i];
+      cudaq::details::DataHandlerBase &dh = getDataHandler(ty);
+      containerMeta.tupleOffsets.push_back(
+          dh.allocateTuple(bufferHandler, dataLayout.second[i]));
+    }
+  }
   for (auto ty : containerMeta.tupleTypes) {
     cudaq::details::DataHandlerBase &dh = getDataHandler(ty);
     containerMeta.tupleOffsets.push_back(dh.allocateTuple(bufferHandler));

@@ -131,9 +131,9 @@ public:
 
   /// TODO: Revisit tuple parsing to account for alignment
   template <typename T>
-  size_t allocateTupleRecord() {
+  size_t allocateTupleRecord(std::size_t fieldOffset = 0) {
     size_t position = buffer.size();
-    buffer.resize(position + sizeof(T));
+    buffer.resize(position + fieldOffset + sizeof(T));
     return position;
   }
 
@@ -228,7 +228,7 @@ public:
   virtual size_t allocateArray(BufferHandler &bh, std::size_t arrSize) = 0;
   virtual void insertIntoArray(BufferHandler &bh, std::size_t offset,
                                std::size_t index, const std::string &value) = 0;
-  virtual size_t allocateTuple(BufferHandler &bh) = 0;
+  virtual size_t allocateTuple(BufferHandler &bh, std::size_t offset = 0) = 0;
   virtual void insertIntoTuple(BufferHandler &bh, std::size_t offset,
                                const std::string &value) = 0;
 };
@@ -251,8 +251,8 @@ public:
                        const std::string &value) override {
     bh.insertIntoArray<T>(offset, index, converter->convert(value));
   }
-  size_t allocateTuple(BufferHandler &bh) override {
-    return bh.allocateTupleRecord<T>();
+  size_t allocateTuple(BufferHandler &bh, std::size_t offset = 0) override {
+    return bh.allocateTupleRecord<T>(offset);
   }
   void insertIntoTuple(BufferHandler &bh, std::size_t offset,
                        const std::string &value) override {
@@ -271,6 +271,7 @@ public:
 class RecordLogDecoder {
 public:
   RecordLogDecoder() = default;
+  RecordLogDecoder(const std::string &kernelName) : kernelName(kernelName) {}
   ~RecordLogDecoder() = default;
 
   /// Does the heavy-lifting of parsing the output log and converting it to a
@@ -315,5 +316,7 @@ private:
   details::BufferHandler bufferHandler;
   /// Tracks container metadata during decoding
   details::ContainerMetadata containerMeta;
+  /// Optional name of the kernel this decoder is associated with
+  std::string kernelName;
 };
 } // namespace cudaq
