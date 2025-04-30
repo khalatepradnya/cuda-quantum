@@ -317,11 +317,12 @@ private:
   /// Get data handler for the specified type
   details::DataHandlerBase &getDataHandler(const std::string &dataType);
   ///
-  std::pair<std::size_t, std::vector<std::size_t>> getDataLayout() {
+  std::pair<std::size_t, std::vector<std::size_t>> getDataLayout();
+  /* {
     if (layoutProvider && !kernelName.empty())
       return layoutProvider(kernelName);
     return {0, {}};
-  }
+  } */
 
   RecordSchemaType schema = RecordSchemaType::ORDERED;
   OutputType currentOutput;

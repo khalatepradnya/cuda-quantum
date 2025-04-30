@@ -164,6 +164,26 @@ void cudaq::RecordLogDecoder::preallocateArray() {
       dh.allocateArray(bufferHandler, containerMeta.elementCount);
 }
 
+std::pair<std::size_t, std::vector<std::size_t>>
+cudaq::RecordLogDecoder::getDataLayout() {
+  using LayoutFuncType =
+      std::pair<std::size_t, std::vector<std::size_t>> (*)(const std::string &);
+
+  static LayoutFuncType layoutFunc = nullptr;
+  if (!layoutFunc) {
+    // Find symbol in already loaded libraries
+    void *handle = dlopen(nullptr, RTLD_LAZY);
+    layoutFunc = reinterpret_cast<LayoutFuncType>(
+        dlsym(handle, "_ZN5cudaq17extractDataLayoutERKNSt7__cxx1112basic_"
+                      "stringIcSt11char_traitsIcESaIcEEE"));
+    if (!layoutFunc) {
+      return {0, {}}; // Function not found
+    }
+  }
+
+  return layoutFunc(kernelName);
+}
+
 void cudaq::RecordLogDecoder::preallocateTuple() {
   containerMeta.dataOffset = bufferHandler.getBufferSize();
   if (!kernelName.empty() && layoutProvider) {
