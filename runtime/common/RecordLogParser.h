@@ -75,7 +75,7 @@ public:
 //===----------------------------------------------------------------------===//
 
 /// A helper class to manage the underlying memory buffer used by
-/// 'RecordLogDecoder'. For container types, i.e. composite records, the buffer
+/// 'RecordLogParser'. For container types, i.e. composite records, the buffer
 /// acts as outer vector with pointers to inner buffers.
 class BufferHandler {
 public:
@@ -129,10 +129,11 @@ public:
     ptrLoc[0][index] = value;
   }
 
+  /// TODO: Revisit tuple parsing to account for alignment
   template <typename T>
-  size_t allocateTupleRecord(std::size_t fieldOffset = 0) {
+  size_t allocateTupleRecord() {
     size_t position = buffer.size();
-    buffer.resize(position + fieldOffset + sizeof(T));
+    buffer.resize(position + sizeof(T));
     return position;
   }
 
@@ -227,7 +228,7 @@ public:
   virtual size_t allocateArray(BufferHandler &bh, std::size_t arrSize) = 0;
   virtual void insertIntoArray(BufferHandler &bh, std::size_t offset,
                                std::size_t index, const std::string &value) = 0;
-  virtual size_t allocateTuple(BufferHandler &bh, std::size_t offset = 0) = 0;
+  virtual size_t allocateTuple(BufferHandler &bh) = 0;
   virtual void insertIntoTuple(BufferHandler &bh, std::size_t offset,
                                const std::string &value) = 0;
 };
@@ -250,8 +251,8 @@ public:
                        const std::string &value) override {
     bh.insertIntoArray<T>(offset, index, converter->convert(value));
   }
-  size_t allocateTuple(BufferHandler &bh, std::size_t offset = 0) override {
-    return bh.allocateTupleRecord<T>(offset);
+  size_t allocateTuple(BufferHandler &bh) override {
+    return bh.allocateTupleRecord<T>();
   }
   void insertIntoTuple(BufferHandler &bh, std::size_t offset,
                        const std::string &value) override {
@@ -267,32 +268,23 @@ public:
 
 /// Simple decoder for translating QIR recorded results to a C++ binary data
 /// structure.
-class RecordLogDecoder {
+class RecordLogParser {
 public:
-  using DataLayoutCallback =
-      std::function<std::pair<std::size_t, std::vector<std::size_t>>(
-          const std::string &)>;
-
-  RecordLogDecoder() = default;
-  RecordLogDecoder(const std::string &kernelName) : kernelName(kernelName) {}
-  ~RecordLogDecoder() = default;
+  RecordLogParser() = default;
+  ~RecordLogParser() = default;
 
   /// Does the heavy-lifting of parsing the output log and converting it to a
   /// binary data structure that is compatible with the C++ host code. The data
   /// structure is created in a generic memory buffer. The buffer's address and
   /// length may be queried and returned as a result.
-  void decode(const std::string &outputLog);
+  void parse(const std::string &outputLog);
 
   /// Get a pointer to the data buffer. Note that the data buffer will be
-  /// deallocated as soon as the RecordLogDecoder object is deconstructed.
+  /// deallocated as soon as the RecordLogParser object is deconstructed.
   void *getBufferPtr() const { return bufferHandler.getBufferPtr(); }
 
   /// Get the size of the data buffer (in bytes).
   std::size_t getBufferSize() const { return bufferHandler.getBufferSize(); }
-
-  void setLayoutCallback(DataLayoutCallback callback) {
-    layoutProvider = callback;
-  }
 
 private:
   /// Process different types of records
@@ -316,13 +308,6 @@ private:
   void processTupleEntry(const std::string &, const std::string &);
   /// Get data handler for the specified type
   details::DataHandlerBase &getDataHandler(const std::string &dataType);
-  ///
-  std::pair<std::size_t, std::vector<std::size_t>> getDataLayout();
-  /* {
-    if (layoutProvider && !kernelName.empty())
-      return layoutProvider(kernelName);
-    return {0, {}};
-  } */
 
   RecordSchemaType schema = RecordSchemaType::ORDERED;
   OutputType currentOutput;
@@ -330,9 +315,5 @@ private:
   details::BufferHandler bufferHandler;
   /// Tracks container metadata during decoding
   details::ContainerMetadata containerMeta;
-  /// Optional name of the kernel this decoder is associated with
-  std::string kernelName;
-  /// Function to get the target data layout information
-  DataLayoutCallback layoutProvider;
 };
 } // namespace cudaq

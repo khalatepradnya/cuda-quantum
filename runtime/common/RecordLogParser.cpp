@@ -6,9 +6,9 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-#include "RecordLogDecoder.h"
+#include "RecordLogParser.h"
 
-void cudaq::RecordLogDecoder::decode(const std::string &outputLog) {
+void cudaq::RecordLogParser::parse(const std::string &outputLog) {
   std::vector<std::string> lines = cudaq::split(outputLog, '\n');
   if (lines.empty())
     return;
@@ -20,7 +20,7 @@ void cudaq::RecordLogDecoder::decode(const std::string &outputLog) {
   }
 }
 
-void cudaq::RecordLogDecoder::handleRecord(
+void cudaq::RecordLogParser::handleRecord(
     const std::vector<std::string> &entries) {
   const std::string &recordType = entries[0];
   if (recordType == "HEADER")
@@ -37,7 +37,7 @@ void cudaq::RecordLogDecoder::handleRecord(
     throw std::runtime_error("Invalid record type: " + recordType);
 }
 
-void cudaq::RecordLogDecoder::handleHeader(
+void cudaq::RecordLogParser::handleHeader(
     const std::vector<std::string> &entries) {
   if (entries.size() < 3)
     throw std::runtime_error("Invalid HEADER record");
@@ -52,17 +52,17 @@ void cudaq::RecordLogDecoder::handleHeader(
   /// TODO: Handle schema version if needed
 }
 
-void cudaq::RecordLogDecoder::handleMetadata(
+void cudaq::RecordLogParser::handleMetadata(
     const std::vector<std::string> &entries) {
   // Ignore metadata for now
 }
 
-void cudaq::RecordLogDecoder::handleStart(
+void cudaq::RecordLogParser::handleStart(
     const std::vector<std::string> &entries) {
   // Ignore start of a shot for now
 }
 
-void cudaq::RecordLogDecoder::handleEnd(
+void cudaq::RecordLogParser::handleEnd(
     const std::vector<std::string> &entries) {
   if (entries.size() < 2)
     throw std::runtime_error("Missing shot status");
@@ -70,7 +70,7 @@ void cudaq::RecordLogDecoder::handleEnd(
     throw std::runtime_error("Cannot handle unsuccessful shot");
 }
 
-void cudaq::RecordLogDecoder::handleOutput(
+void cudaq::RecordLogParser::handleOutput(
     const std::vector<std::string> &entries) {
   if (entries.size() < 3)
     throw std::runtime_error("Insufficient data in a record");
@@ -124,7 +124,7 @@ void cudaq::RecordLogDecoder::handleOutput(
 }
 
 cudaq::details::DataHandlerBase &
-cudaq::RecordLogDecoder::getDataHandler(const std::string &dataType) {
+cudaq::RecordLogParser::getDataHandler(const std::string &dataType) {
   // Static handlers for different data types
   static details::DataHandler<char> boolHandler(
       std::make_unique<details::BooleanConverter>());
@@ -158,56 +158,22 @@ cudaq::RecordLogDecoder::getDataHandler(const std::string &dataType) {
   throw std::runtime_error("Unsupported data type: " + dataType);
 }
 
-void cudaq::RecordLogDecoder::preallocateArray() {
+void cudaq::RecordLogParser::preallocateArray() {
   cudaq::details::DataHandlerBase &dh = getDataHandler(containerMeta.arrayType);
   containerMeta.dataOffset =
       dh.allocateArray(bufferHandler, containerMeta.elementCount);
 }
 
-std::pair<std::size_t, std::vector<std::size_t>>
-cudaq::RecordLogDecoder::getDataLayout() {
-  using LayoutFuncType =
-      std::pair<std::size_t, std::vector<std::size_t>> (*)(const std::string &);
-
-  static LayoutFuncType layoutFunc = nullptr;
-  if (!layoutFunc) {
-    // Find symbol in already loaded libraries
-    void *handle = dlopen(nullptr, RTLD_LAZY);
-    layoutFunc = reinterpret_cast<LayoutFuncType>(
-        dlsym(handle, "_ZN5cudaq17extractDataLayoutERKNSt7__cxx1112basic_"
-                      "stringIcSt11char_traitsIcESaIcEEE"));
-    if (!layoutFunc) {
-      return {0, {}}; // Function not found
-    }
-  }
-
-  return layoutFunc(kernelName);
-}
-
-void cudaq::RecordLogDecoder::preallocateTuple() {
+void cudaq::RecordLogParser::preallocateTuple() {
   containerMeta.dataOffset = bufferHandler.getBufferSize();
-  if (!kernelName.empty() && layoutProvider) {
-    auto dataLayout = getDataLayout();
-    if (dataLayout.second.size() != containerMeta.tupleTypes.size())
-      throw std::runtime_error("Tuple size mismatch in kernel and label.");
-    auto prevSize = bufferHandler.getBufferSize();
-    for (size_t i = 0; i < containerMeta.tupleTypes.size(); ++i) {
-      auto &dh = getDataHandler(containerMeta.tupleTypes[i]);
-      containerMeta.tupleOffsets.push_back(
-          dh.allocateTuple(bufferHandler, dataLayout.second[i]));
-    }
-    if (dataLayout.first != bufferHandler.getBufferSize() - prevSize)
-      throw std::runtime_error("Tuple size mismatch in kernel and label.");
-  }
-  // Fallback to sequential allocation
   for (auto ty : containerMeta.tupleTypes) {
     cudaq::details::DataHandlerBase &dh = getDataHandler(ty);
     containerMeta.tupleOffsets.push_back(dh.allocateTuple(bufferHandler));
   }
 }
 
-void cudaq::RecordLogDecoder::processSingleRecord(const std::string &recValue,
-                                                  const std::string &recLabel) {
+void cudaq::RecordLogParser::processSingleRecord(const std::string &recValue,
+                                                 const std::string &recLabel) {
   auto label = recLabel;
   if (label.empty()) {
     if (currentOutput == OutputType::BOOL)
@@ -221,8 +187,8 @@ void cudaq::RecordLogDecoder::processSingleRecord(const std::string &recValue,
   dh.addRecord(bufferHandler, recValue);
 }
 
-void cudaq::RecordLogDecoder::processArrayEntry(const std::string &recValue,
-                                                const std::string &recLabel) {
+void cudaq::RecordLogParser::processArrayEntry(const std::string &recValue,
+                                               const std::string &recLabel) {
   std::size_t index = containerMeta.extractIndex(recLabel);
   if (index >= containerMeta.elementCount)
     throw std::runtime_error("Array index out of bounds");
@@ -230,8 +196,8 @@ void cudaq::RecordLogDecoder::processArrayEntry(const std::string &recValue,
   dh.insertIntoArray(bufferHandler, containerMeta.dataOffset, index, recValue);
 }
 
-void cudaq::RecordLogDecoder::processTupleEntry(const std::string &recValue,
-                                                const std::string &recLabel) {
+void cudaq::RecordLogParser::processTupleEntry(const std::string &recValue,
+                                               const std::string &recLabel) {
   std::size_t index = containerMeta.extractIndex(recLabel);
   if (index >= containerMeta.elementCount)
     throw std::runtime_error("Tuple index out of bounds");
