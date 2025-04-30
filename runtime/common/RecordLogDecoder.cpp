@@ -7,7 +7,6 @@
  ******************************************************************************/
 
 #include "RecordLogDecoder.h"
-#include "common/RuntimeMLIR.h"
 
 void cudaq::RecordLogDecoder::decode(const std::string &outputLog) {
   std::vector<std::string> lines = cudaq::split(outputLog, '\n');
@@ -167,17 +166,20 @@ void cudaq::RecordLogDecoder::preallocateArray() {
 
 void cudaq::RecordLogDecoder::preallocateTuple() {
   containerMeta.dataOffset = bufferHandler.getBufferSize();
-  if (!kernelName.empty()) {
-    auto dataLayout = cudaq::extractDataLayout(kernelName);
+  if (!kernelName.empty() && layoutProvider) {
+    auto dataLayout = getDataLayout();
     if (dataLayout.second.size() != containerMeta.tupleTypes.size())
       throw std::runtime_error("Tuple size mismatch in kernel and label.");
+    auto prevSize = bufferHandler.getBufferSize();
     for (size_t i = 0; i < containerMeta.tupleTypes.size(); ++i) {
-      auto ty = containerMeta.tupleTypes[i];
-      cudaq::details::DataHandlerBase &dh = getDataHandler(ty);
+      auto &dh = getDataHandler(containerMeta.tupleTypes[i]);
       containerMeta.tupleOffsets.push_back(
           dh.allocateTuple(bufferHandler, dataLayout.second[i]));
     }
+    if (dataLayout.first != bufferHandler.getBufferSize() - prevSize)
+      throw std::runtime_error("Tuple size mismatch in kernel and label.");
   }
+  // Fallback to sequential allocation
   for (auto ty : containerMeta.tupleTypes) {
     cudaq::details::DataHandlerBase &dh = getDataHandler(ty);
     containerMeta.tupleOffsets.push_back(dh.allocateTuple(bufferHandler));

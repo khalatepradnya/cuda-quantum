@@ -129,7 +129,6 @@ public:
     ptrLoc[0][index] = value;
   }
 
-  /// TODO: Revisit tuple parsing to account for alignment
   template <typename T>
   size_t allocateTupleRecord(std::size_t fieldOffset = 0) {
     size_t position = buffer.size();
@@ -270,6 +269,10 @@ public:
 /// structure.
 class RecordLogDecoder {
 public:
+  using DataLayoutCallback =
+      std::function<std::pair<std::size_t, std::vector<std::size_t>>(
+          const std::string &)>;
+
   RecordLogDecoder() = default;
   RecordLogDecoder(const std::string &kernelName) : kernelName(kernelName) {}
   ~RecordLogDecoder() = default;
@@ -286,6 +289,10 @@ public:
 
   /// Get the size of the data buffer (in bytes).
   std::size_t getBufferSize() const { return bufferHandler.getBufferSize(); }
+
+  void setLayoutCallback(DataLayoutCallback callback) {
+    layoutProvider = callback;
+  }
 
 private:
   /// Process different types of records
@@ -309,6 +316,12 @@ private:
   void processTupleEntry(const std::string &, const std::string &);
   /// Get data handler for the specified type
   details::DataHandlerBase &getDataHandler(const std::string &dataType);
+  ///
+  std::pair<std::size_t, std::vector<std::size_t>> getDataLayout() {
+    if (layoutProvider && !kernelName.empty())
+      return layoutProvider(kernelName);
+    return {0, {}};
+  }
 
   RecordSchemaType schema = RecordSchemaType::ORDERED;
   OutputType currentOutput;
@@ -318,5 +331,7 @@ private:
   details::ContainerMetadata containerMeta;
   /// Optional name of the kernel this decoder is associated with
   std::string kernelName;
+  /// Function to get the target data layout information
+  DataLayoutCallback layoutProvider;
 };
 } // namespace cudaq

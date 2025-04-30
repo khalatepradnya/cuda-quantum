@@ -12,6 +12,12 @@
 #include "cudaq/simulators.h"
 #include "nvqir/CircuitSimulator.h"
 
+// Forward declaration of the function to extract data layout
+namespace cudaq {
+std::pair<std::size_t, std::vector<std::size_t>>
+extractDataLayout(const std::string &kernelName);
+}
+
 cudaq::details::RunResultSpan cudaq::details::runTheKernel(
     std::function<void()> &&kernel, quantum_platform &platform,
     const std::string &kernel_name, std::size_t shots) {
@@ -50,6 +56,11 @@ cudaq::details::RunResultSpan cudaq::details::runTheKernel(
 
   // 3. Pass the outputLog to the decoder (target-specific?)
   cudaq::RecordLogDecoder decoder(kernel_name);
+  decoder.setLayoutCallback(
+      [](const std::string &name)
+          -> std::pair<std::size_t, std::vector<std::size_t>> {
+        return cudaq::extractDataLayout(name);
+      });
   decoder.decode(circuitSimulator->outputLog);
 
   // 4. Get the buffer and length of buffer (in bytes) from the decoder.
