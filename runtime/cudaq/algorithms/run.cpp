@@ -8,15 +8,10 @@
 
 #include "cudaq/algorithms/run.h"
 #include "common/ExecutionContext.h"
+#include "common/LayoutExtractor.h"
 #include "common/RecordLogParser.h"
 #include "cudaq/simulators.h"
 #include "nvqir/CircuitSimulator.h"
-
-// // Forward declaration of the function to extract data layout
-// namespace cudaq {
-// std::pair<std::size_t, std::vector<std::size_t>>
-// extractDataLayout(const std::string &kernelName);
-// }
 
 cudaq::details::RunResultSpan cudaq::details::runTheKernel(
     std::function<void()> &&kernel, quantum_platform &platform,
@@ -54,20 +49,24 @@ cudaq::details::RunResultSpan cudaq::details::runTheKernel(
     }
   }
 
-  // 3. Pass the outputLog to the parser (target-specific?)
-  cudaq::RecordLogParser parser;
+  // 3. Get the data layout information
+  auto quakeCode = cudaq::get_quake_by_name(kernel_name);
+  auto layoutInfo = cudaq::extractDataLayout(kernel_name, quakeCode);
+
+  // 4. Pass the outputLog to the parser (target-specific?)
+  cudaq::RecordLogParser parser(layoutInfo);
   parser.parse(circuitSimulator->outputLog);
 
-  // 4. Get the buffer and length of buffer (in bytes) from the parser.
+  // 5. Get the buffer and length of buffer (in bytes) from the parser.
   auto *origBuffer = parser.getBufferPtr();
   std::size_t bufferSize = parser.getBufferSize();
   char *buffer = static_cast<char *>(malloc(bufferSize));
   std::memcpy(buffer, origBuffer, bufferSize);
 
-  // 5. Clear the outputLog (?)
+  // 6. Clear the outputLog (?)
   circuitSimulator->outputLog.clear();
 
-  // 6. Pass the span back as a RunResultSpan. NB: it is the responsibility of
+  // 7. Pass the span back as a RunResultSpan. NB: it is the responsibility of
   // the caller to free the buffer.
   return {buffer, bufferSize};
 }

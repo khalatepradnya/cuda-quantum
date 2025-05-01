@@ -49,10 +49,6 @@ void optimizeLLVM(llvm::Module *);
 mlir::ExecutionEngine *createQIRJITEngine(mlir::ModuleOp &moduleOp,
                                           llvm::StringRef convertTo);
 
-/// @brief Get the data layout of a kernel's return type
-std::pair<std::size_t, std::vector<std::size_t>>
-extractDataLayout(const std::string &);
-
 class Translation {
 public:
   Translation() = default;

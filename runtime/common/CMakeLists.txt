@@ -131,3 +131,35 @@ target_link_libraries(cudaq-mlir-runtime
     spdlog::spdlog)
 
 install(TARGETS cudaq-mlir-runtime DESTINATION lib)
+
+## ----- Datalayout Library -----
+## This library is used by runtime to get the LLVM data layout for a specific 
+## data type. This will be used by the `run` API and hence a dependency for the
+## `cudaq` library. It has to be separate from `cudaq-mlir-runtime` because the
+## latter is linked to `cudaq` library and will cause a circular dependency.
+
+add_library(cudaq-layout-extractor
+  SHARED
+    LayoutExtractor.cpp
+)
+set_property(GLOBAL APPEND PROPERTY CUDAQ_RUNTIME_LIBS cudaq-layout-extractor)
+
+target_include_directories(cudaq-layout-extractor
+  PRIVATE .
+    ${CMAKE_SOURCE_DIR}/runtime)
+
+target_link_libraries(cudaq-layout-extractor
+  PRIVATE
+    OptCodeGen
+    OptTransforms
+    MLIRIR
+    MLIRParser
+    MLIRLLVMCommonConversion
+    MLIRLLVMToLLVMIRTranslation
+)
+install(TARGETS cudaq-layout-extractor EXPORT cudaq-layout-extractor-targets DESTINATION lib)
+
+install(EXPORT cudaq-layout-extractor-targets
+        FILE CUDAQLayoutExtractorTargets.cmake
+        NAMESPACE cudaq::
+        DESTINATION lib/cmake/cudaq)
