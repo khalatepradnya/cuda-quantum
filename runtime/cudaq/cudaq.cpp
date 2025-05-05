@@ -313,6 +313,34 @@ bool cudaq::__internal__::isLibraryMode(const std::string &kernelname) {
 }
 
 //===----------------------------------------------------------------------===//
+// Registry that maps device code keys to
+//===----------------------------------------------------------------------===//
+static std::vector<
+    std::pair<std::string, std::pair<std::size_t, std::vector<std::size_t>>>>
+    returnTypeLayoutRegistry;
+
+void cudaq::registry::__cudaq_kernelReturnTypeLayoutAdd(
+    const char *kernelName, const size_t *totalSize,
+    const size_t **fieldOffsets, const size_t *numOffsets) {
+  std::unique_lock<std::shared_mutex> lock(globalRegistryMutex);
+  auto it = std::find_if(
+      returnTypeLayoutRegistry.begin(), returnTypeLayoutRegistry.end(),
+      [&](const auto &pair) { return pair.first == kernelName; });
+  std::vector<std::size_t> offsets(*numOffsets);
+  for (std::size_t i = 0; i < *numOffsets; ++i)
+    offsets[i] = fieldOffsets[i][0];
+  if (it != returnTypeLayoutRegistry.end()) {
+    cudaq::info("Replacing code for kernel {}", kernelName);
+    it->second =
+        std::pair<std::size_t, std::vector<std::size_t>>(*totalSize, offsets);
+    return;
+  }
+  returnTypeLayoutRegistry.emplace_back(
+      kernelName,
+      std::pair<std::size_t, std::vector<std::size_t>>(*totalSize, offsets));
+}
+
+//===----------------------------------------------------------------------===//
 
 namespace nvqir {
 void setRandomSeed(std::size_t);

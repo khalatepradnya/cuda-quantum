@@ -15,6 +15,8 @@ void __cudaq_deviceCodeHolderAdd(const char *, const char *);
 void cudaqRegisterKernelName(const char *);
 void cudaqRegisterArgsCreator(const char *, char *);
 void cudaqRegisterLambdaName(const char *, const char *);
+void __cudaq_kernelReturnTypeLayoutAdd(const char *, const size_t *,
+                                       const size_t **, const size_t *);
 
 /// Register a kernel with the runtime for kernel runtime stitching.
 void __cudaq_registerLinkableKernel(void *, const char *, void *);

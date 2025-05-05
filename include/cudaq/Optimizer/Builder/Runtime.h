@@ -42,6 +42,9 @@ static constexpr const char mangledNameMap[] = "quake.mangled_name_map";
 static constexpr const char deviceCodeHolderAdd[] =
     "__cudaq_deviceCodeHolderAdd";
 
+static constexpr const char returnTypeLayoutAdd[] =
+    "__cudaq_kernelReturnTypeLayoutAdd";
+
 static constexpr const char registerLinkableKernel[] =
     "__cudaq_registerLinkableKernel";
 static constexpr const char getLinkableKernelKey[] =
