@@ -98,6 +98,16 @@ public:
               cudaq::opt::factory::getVoidType(ctx),
               {cudaq::opt::factory::getPointerType(ctx),
                cudaq::opt::factory::getPointerType(ctx)}));
+
+      // Add declaration of returnTypeLayoutAdd
+      builder.create<LLVM::LLVMFuncOp>(
+          loc, cudaq::runtime::returnTypeLayoutAdd,
+          LLVM::LLVMFunctionType::get(
+              cudaq::opt::factory::getVoidType(ctx),
+              {cudaq::opt::factory::getPointerType(ctx),
+               cudaq::opt::factory::getPointerType(ctx),
+               cudaq::opt::factory::getPointerType(ctx),
+               cudaq::opt::factory::getPointerType(ctx)}));
     }
 
     auto mangledNameMap =
@@ -221,6 +231,65 @@ public:
                                    cudaq::runtime::deviceCodeHolderAdd,
                                    ValueRange{castDevRef, castCodeRef});
 
+      /// ASKME: Save for all return types or only struct types is sufficient?
+      if (funcOp.getNumResults() > 0 &&
+          isa<cudaq::cc::StructType>(funcOp.getResultTypes()[0])) {
+        auto initFnInsertionPt = builder.saveInsertionPoint();
+        builder.restoreInsertionPoint(insPt);
+        auto [totalSize, fieldOffsets] = extractReturnLayout(funcOp);
+        auto i64Ty = builder.getI64Type();
+
+        // Create global constant with the total size
+        auto sizeGlobal = builder.create<LLVM::GlobalOp>(
+            loc, i64Ty, /*isConstant=*/true, LLVM::Linkage::Private,
+            className.str() + ".returnTy.struct_size",
+            builder.getI64IntegerAttr(totalSize), /*alignment=*/0);
+        // Create global constant with the field offsets
+        auto arrayTy = LLVM::LLVMArrayType::get(i64Ty, fieldOffsets.size());
+        SmallVector<mlir::Attribute> offsetAttrs;
+        for (auto offset : fieldOffsets)
+          offsetAttrs.push_back(builder.getI64IntegerAttr(offset));
+        auto offsetsArrayAttr = builder.getArrayAttr(offsetAttrs);
+        auto offsetsGlobal = builder.create<LLVM::GlobalOp>(
+            loc, arrayTy, /*isConstant=*/true, LLVM::Linkage::Private,
+            className.str() + ".returnTy.field_offsets",
+            builder.getArrayAttr(offsetsArrayAttr),
+            /*alignment=*/0);
+        // Create global constant with the number of offsets
+        auto numOffsetsGlobal = builder.create<LLVM::GlobalOp>(
+            loc, i64Ty, /*isConstant=*/true, LLVM::Linkage::Private,
+            className.str() + ".returnTy.num_offsets",
+            builder.getI64IntegerAttr(fieldOffsets.size()),
+            /*alignment=*/0);
+
+        insPt = builder.saveInsertionPoint();
+        builder.restoreInsertionPoint(initFnInsertionPt);
+        auto ptrTy = cudaq::cc::PointerType::get(builder.getI8Type());
+        auto sizeRef = builder.create<LLVM::AddressOfOp>(
+            loc, cudaq::opt::factory::getPointerType(sizeGlobal.getType()),
+            sizeGlobal.getSymName());
+        auto castSizeRef =
+            builder.create<cudaq::cc::CastOp>(loc, ptrTy, sizeRef);
+
+        auto offsetsRef = builder.create<LLVM::AddressOfOp>(
+            loc, cudaq::opt::factory::getPointerType(offsetsGlobal.getType()),
+            offsetsGlobal.getSymName());
+        auto castOffsetsRef =
+            builder.create<cudaq::cc::CastOp>(loc, ptrTy, offsetsRef);
+
+        auto numOffsetsRef = builder.create<LLVM::AddressOfOp>(
+            loc,
+            cudaq::opt::factory::getPointerType(numOffsetsGlobal.getType()),
+            numOffsetsGlobal.getSymName());
+        auto castNumOffsetsRef = builder.create<cudaq::cc::CastOp>(
+            loc, cudaq::cc::PointerType::get(builder.getI8Type()),
+            numOffsetsRef);
+        builder.create<func::CallOp>(
+            loc, std::nullopt, cudaq::runtime::returnTypeLayoutAdd,
+            ValueRange{castDevRef, castSizeRef, castOffsetsRef,
+                       castNumOffsetsRef});
+      }
+
       auto kernName = funcOp.getSymName().str();
       if (!jitTime && mangledNameMap && !mangledNameMap.empty() &&
           mangledNameMap.contains(kernName)) {
@@ -254,58 +323,6 @@ public:
         builder.create<func::CallOp>(
             loc, std::nullopt, cudaq::runtime::registerLinkableKernel,
             ValueRange{castEntryRef, castKernNameRef, castDeviceRef});
-
-        /// ASKME: Save for all return types or only struct types is sufficient?
-        if (funcOp.getNumResults() > 0 &&
-            isa<cudaq::cc::StructType>(funcOp.getResultTypes()[0])) {
-          auto [totalSize, fieldOffsets] = extractReturnLayout(funcOp);
-          auto i64Ty = builder.getI64Type();
-          auto ptrTy = cudaq::cc::PointerType::get(builder.getI8Type());
-          // Create global constant with the total size
-          std::string sizeName = className.str() + ".returnTy.struct_size";
-          auto sizeGlobal = builder.create<LLVM::GlobalOp>(
-              loc, i64Ty, /*isConstant=*/true, LLVM::Linkage::Private, sizeName,
-              builder.getI64IntegerAttr(totalSize), /*alignment=*/0);
-          auto sizeRef = builder.create<LLVM::AddressOfOp>(
-              loc, cudaq::opt::factory::getPointerType(sizeGlobal.getType()),
-              sizeGlobal.getSymName());
-          auto castSizeRef =
-              builder.create<cudaq::cc::CastOp>(loc, ptrTy, sizeRef);
-          // Create global constant with the field offsets
-          auto arrayTy = LLVM::LLVMArrayType::get(i64Ty, fieldOffsets.size());
-          SmallVector<mlir::Attribute> offsetAttrs;
-          for (auto offset : fieldOffsets)
-            offsetAttrs.push_back(builder.getI64IntegerAttr(offset));
-          auto offsetsArrayAttr = builder.getArrayAttr(offsetAttrs);
-          std::string offsetsName = className.str() + ".returnTy.field_offsets";
-          auto offsetsGlobal = builder.create<LLVM::GlobalOp>(
-              loc, arrayTy, /*isConstant=*/true, LLVM::Linkage::Private,
-              offsetsName, builder.getArrayAttr(offsetsArrayAttr),
-              /*alignment=*/0);
-          auto offsetsRef = builder.create<LLVM::AddressOfOp>(
-              loc, cudaq::opt::factory::getPointerType(offsetsGlobal.getType()),
-              offsetsGlobal.getSymName());
-          auto castOffsetsRef =
-              builder.create<cudaq::cc::CastOp>(loc, ptrTy, offsetsRef);
-          // Create global constant with the number of offsets
-          std::string numOffsetsName =
-              className.str() + ".returnTy.num_offsets";
-          auto numOffsetsGlobal = builder.create<LLVM::GlobalOp>(
-              loc, i64Ty, /*isConstant=*/true, LLVM::Linkage::Private,
-              numOffsetsName, builder.getI64IntegerAttr(fieldOffsets.size()),
-              /*alignment=*/0);
-          auto numOffsetsRef = builder.create<LLVM::AddressOfOp>(
-              loc,
-              cudaq::opt::factory::getPointerType(numOffsetsGlobal.getType()),
-              numOffsetsGlobal.getSymName());
-          auto castNumOffsetsRef = builder.create<cudaq::cc::CastOp>(
-              loc, cudaq::cc::PointerType::get(builder.getI8Type()),
-              numOffsetsRef);
-          builder.create<func::CallOp>(
-              loc, std::nullopt, cudaq::runtime::returnTypeLayoutAdd,
-              ValueRange{castKernNameRef, castSizeRef, castOffsetsRef,
-                         castNumOffsetsRef});
-        }
       }
 
       builder.create<LLVM::ReturnOp>(loc, ValueRange{});

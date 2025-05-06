@@ -43,7 +43,7 @@ static constexpr const char deviceCodeHolderAdd[] =
     "__cudaq_deviceCodeHolderAdd";
 
 static constexpr const char returnTypeLayoutAdd[] =
-    "__cudaq_kernelReturnTypeLayoutAdd";
+    "__cudaq_returnTypeLayoutAdd";
 
 static constexpr const char registerLinkableKernel[] =
     "__cudaq_registerLinkableKernel";

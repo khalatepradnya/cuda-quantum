@@ -51,7 +51,7 @@ get_quake_by_name(const std::string &kernelName, bool throwException,
 
 /// @brief Given a string kernel name, TBD
 std::pair<std::size_t, std::vector<std::size_t>>
-get_kernel_return_type_layout(const std::string &kernelName);
+get_return_type_layout(const std::string &kernelName);
 
 // Simple test to see if the QuantumKernel template
 // type is a `cudaq::builder` with `operator()(Args...)`

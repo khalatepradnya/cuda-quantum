@@ -319,9 +319,10 @@ static std::vector<
     std::pair<std::string, std::pair<std::size_t, std::vector<std::size_t>>>>
     returnTypeLayoutRegistry;
 
-void cudaq::registry::__cudaq_kernelReturnTypeLayoutAdd(
-    const char *kernelName, const size_t *totalSize,
-    const size_t **fieldOffsets, const size_t *numOffsets) {
+void cudaq::registry::__cudaq_returnTypeLayoutAdd(const char *kernelName,
+                                                  const size_t *totalSize,
+                                                  const size_t **fieldOffsets,
+                                                  const size_t *numOffsets) {
   std::unique_lock<std::shared_mutex> lock(globalRegistryMutex);
   auto it = std::find_if(
       returnTypeLayoutRegistry.begin(), returnTypeLayoutRegistry.end(),
@@ -417,7 +418,7 @@ bool kernelHasConditionalFeedback(const std::string &kernelName) {
 }
 
 std::pair<std::size_t, std::vector<std::size_t>>
-get_kernel_return_type_layout(const std::string &kernelName) {
+get_return_type_layout(const std::string &kernelName) {
   auto kernelNamePrefix = kernelName + '.';
   std::shared_lock<std::shared_mutex> lock(globalRegistryMutex);
   auto it = std::find_if(

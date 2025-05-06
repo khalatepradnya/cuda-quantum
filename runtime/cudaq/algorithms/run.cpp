@@ -50,8 +50,7 @@ cudaq::details::RunResultSpan cudaq::details::runTheKernel(
   }
 
   // 3. Pass the outputLog to the parser (target-specific?)
-  cudaq::RecordLogParser parser(
-      cudaq::get_kernel_return_type_layout(kernel_name));
+  cudaq::RecordLogParser parser(cudaq::get_return_type_layout(kernel_name));
   parser.parse(circuitSimulator->outputLog);
 
   // 4. Get the buffer and length of buffer (in bytes) from the parser.

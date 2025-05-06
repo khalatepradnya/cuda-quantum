@@ -148,7 +148,7 @@ public:
   template <typename T>
   size_t allocateTupleRecord(std::size_t fieldOffset = 0) {
     size_t position = buffer.size();
-    buffer.resize(position + fieldOffset + sizeof(T));
+    buffer.resize(position + (fieldOffset == 0 ? sizeof(T) : fieldOffset));
     return position;
   }
 
