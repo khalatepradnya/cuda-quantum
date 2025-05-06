@@ -59,15 +59,11 @@ std::pair<std::size_t, std::vector<std::size_t>> inline extractReturnLayout(
           cast<llvm::StructType>(translator.translateType(llvmDialectTy));
       auto *layout = dataLayout.getStructLayout(llvmStructTy);
       totalSize = layout->getSizeInBytes();
-      std::vector<std::size_t> fieldOffsets;
       std::size_t numElements = structType.getMembers().size();
       for (std::size_t i = 0; i < numElements; ++i)
         fieldOffsets.emplace_back(layout->getElementOffset(i));
-    }
-    /// Temporarily commented out ld.lld: error: undefined symbol:
-    /// cudaq::opt::getDataSize(llvm::DataLayout&, mlir::Type)
-    // else
-    //   totalSize = cudaq::opt::getDataSize(dataLayout, returnType);
+    } else
+      totalSize = cudaq::opt::getDataSize(dataLayout, returnType);
   }
   return {totalSize, fieldOffsets};
 }
@@ -264,27 +260,26 @@ public:
 
         insPt = builder.saveInsertionPoint();
         builder.restoreInsertionPoint(initFnInsertionPt);
-        auto ptrTy = cudaq::cc::PointerType::get(builder.getI8Type());
+
+        auto ptrTy = cudaq::opt::factory::getPointerType(ctx);
         auto sizeRef = builder.create<LLVM::AddressOfOp>(
             loc, cudaq::opt::factory::getPointerType(sizeGlobal.getType()),
             sizeGlobal.getSymName());
-        auto castSizeRef =
-            builder.create<cudaq::cc::CastOp>(loc, ptrTy, sizeRef);
+        auto castSizeRef = builder.create<LLVM::BitcastOp>(loc, ptrTy, sizeRef);
 
         auto offsetsRef = builder.create<LLVM::AddressOfOp>(
             loc, cudaq::opt::factory::getPointerType(offsetsGlobal.getType()),
             offsetsGlobal.getSymName());
         auto castOffsetsRef =
-            builder.create<cudaq::cc::CastOp>(loc, ptrTy, offsetsRef);
+            builder.create<LLVM::BitcastOp>(loc, ptrTy, offsetsRef);
 
         auto numOffsetsRef = builder.create<LLVM::AddressOfOp>(
             loc,
             cudaq::opt::factory::getPointerType(numOffsetsGlobal.getType()),
             numOffsetsGlobal.getSymName());
-        auto castNumOffsetsRef = builder.create<cudaq::cc::CastOp>(
-            loc, cudaq::cc::PointerType::get(builder.getI8Type()),
-            numOffsetsRef);
-        builder.create<func::CallOp>(
+        auto castNumOffsetsRef =
+            builder.create<LLVM::BitcastOp>(loc, ptrTy, numOffsetsRef);
+        builder.create<LLVM::CallOp>(
             loc, std::nullopt, cudaq::runtime::returnTypeLayoutAdd,
             ValueRange{castDevRef, castSizeRef, castOffsetsRef,
                        castNumOffsetsRef});
