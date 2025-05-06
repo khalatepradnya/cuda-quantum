@@ -11,6 +11,7 @@
 #include "cudaq/Optimizer/Builder/Intrinsics.h"
 #include "cudaq/Optimizer/Builder/Runtime.h"
 #include "cudaq/Optimizer/CallGraphFix.h"
+#include "cudaq/Optimizer/CodeGen/QIROpaqueStructTypes.h"
 #include "cudaq/Optimizer/Dialect/CC/CCOps.h"
 #include "cudaq/Optimizer/Transforms/Passes.h"
 #include "llvm/ADT/DepthFirstIterator.h"
@@ -18,6 +19,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include "mlir/IR/Diagnostics.h"
+#include "mlir/Target/LLVMIR/TypeToLLVM.h"
 #include "mlir/Transforms/Passes.h"
 
 namespace cudaq::opt {
@@ -30,6 +32,46 @@ namespace cudaq::opt {
 using namespace mlir;
 
 namespace {
+
+/// @brief Return the size and member variable offsets for the kernel's return
+/// type.
+std::pair<std::size_t, std::vector<std::size_t>> inline extractReturnLayout(
+    mlir::func::FuncOp kernelFunc) {
+  std::size_t totalSize = 0;
+  std::vector<std::size_t> fieldOffsets;
+  // Only proceed if function has a return type
+  if (kernelFunc.getNumResults() > 0) {
+    mlir::Type returnType = kernelFunc.getResultTypes()[0];
+    auto mod = kernelFunc->getParentOfType<ModuleOp>();
+    StringRef dataLayoutSpec = "";
+    if (auto attr = mod->getAttr(cudaq::opt::factory::targetDataLayoutAttrName))
+      dataLayoutSpec = cast<StringAttr>(attr);
+    auto dataLayout = llvm::DataLayout(dataLayoutSpec);
+    // Convert bufferTy to llvm.
+    llvm::LLVMContext context;
+    LLVMTypeConverter converter(kernelFunc.getContext());
+    cudaq::opt::initializeTypeConversions(converter);
+    // Handle structure types
+    if (auto structType = mlir::dyn_cast<cudaq::cc::StructType>(returnType)) {
+      auto llvmDialectTy = converter.convertType(structType);
+      LLVM::TypeToLLVMIRTranslator translator(context);
+      auto *llvmStructTy =
+          cast<llvm::StructType>(translator.translateType(llvmDialectTy));
+      auto *layout = dataLayout.getStructLayout(llvmStructTy);
+      totalSize = layout->getSizeInBytes();
+      std::vector<std::size_t> fieldOffsets;
+      std::size_t numElements = structType.getMembers().size();
+      for (std::size_t i = 0; i < numElements; ++i)
+        fieldOffsets.emplace_back(layout->getElementOffset(i));
+    }
+    /// Temporarily commented out ld.lld: error: undefined symbol:
+    /// cudaq::opt::getDataSize(llvm::DataLayout&, mlir::Type)
+    // else
+    //   totalSize = cudaq::opt::getDataSize(dataLayout, returnType);
+  }
+  return {totalSize, fieldOffsets};
+}
+
 class GenerateDeviceCodeLoaderPass
     : public cudaq::opt::impl::GenerateDeviceCodeLoaderBase<
           GenerateDeviceCodeLoaderPass> {
@@ -212,6 +254,58 @@ public:
         builder.create<func::CallOp>(
             loc, std::nullopt, cudaq::runtime::registerLinkableKernel,
             ValueRange{castEntryRef, castKernNameRef, castDeviceRef});
+
+        /// ASKME: Save for all return types or only struct types is sufficient?
+        if (funcOp.getNumResults() > 0 &&
+            isa<cudaq::cc::StructType>(funcOp.getResultTypes()[0])) {
+          auto [totalSize, fieldOffsets] = extractReturnLayout(funcOp);
+          auto i64Ty = builder.getI64Type();
+          auto ptrTy = cudaq::cc::PointerType::get(builder.getI8Type());
+          // Create global constant with the total size
+          std::string sizeName = className.str() + ".returnTy.struct_size";
+          auto sizeGlobal = builder.create<LLVM::GlobalOp>(
+              loc, i64Ty, /*isConstant=*/true, LLVM::Linkage::Private, sizeName,
+              builder.getI64IntegerAttr(totalSize), /*alignment=*/0);
+          auto sizeRef = builder.create<LLVM::AddressOfOp>(
+              loc, cudaq::opt::factory::getPointerType(sizeGlobal.getType()),
+              sizeGlobal.getSymName());
+          auto castSizeRef =
+              builder.create<cudaq::cc::CastOp>(loc, ptrTy, sizeRef);
+          // Create global constant with the field offsets
+          auto arrayTy = LLVM::LLVMArrayType::get(i64Ty, fieldOffsets.size());
+          SmallVector<mlir::Attribute> offsetAttrs;
+          for (auto offset : fieldOffsets)
+            offsetAttrs.push_back(builder.getI64IntegerAttr(offset));
+          auto offsetsArrayAttr = builder.getArrayAttr(offsetAttrs);
+          std::string offsetsName = className.str() + ".returnTy.field_offsets";
+          auto offsetsGlobal = builder.create<LLVM::GlobalOp>(
+              loc, arrayTy, /*isConstant=*/true, LLVM::Linkage::Private,
+              offsetsName, builder.getArrayAttr(offsetsArrayAttr),
+              /*alignment=*/0);
+          auto offsetsRef = builder.create<LLVM::AddressOfOp>(
+              loc, cudaq::opt::factory::getPointerType(offsetsGlobal.getType()),
+              offsetsGlobal.getSymName());
+          auto castOffsetsRef =
+              builder.create<cudaq::cc::CastOp>(loc, ptrTy, offsetsRef);
+          // Create global constant with the number of offsets
+          std::string numOffsetsName =
+              className.str() + ".returnTy.num_offsets";
+          auto numOffsetsGlobal = builder.create<LLVM::GlobalOp>(
+              loc, i64Ty, /*isConstant=*/true, LLVM::Linkage::Private,
+              numOffsetsName, builder.getI64IntegerAttr(fieldOffsets.size()),
+              /*alignment=*/0);
+          auto numOffsetsRef = builder.create<LLVM::AddressOfOp>(
+              loc,
+              cudaq::opt::factory::getPointerType(numOffsetsGlobal.getType()),
+              numOffsetsGlobal.getSymName());
+          auto castNumOffsetsRef = builder.create<cudaq::cc::CastOp>(
+              loc, cudaq::cc::PointerType::get(builder.getI8Type()),
+              numOffsetsRef);
+          builder.create<func::CallOp>(
+              loc, std::nullopt, cudaq::runtime::returnTypeLayoutAdd,
+              ValueRange{castKernNameRef, castSizeRef, castOffsetsRef,
+                         castNumOffsetsRef});
+        }
       }
 
       builder.create<LLVM::ReturnOp>(loc, ValueRange{});

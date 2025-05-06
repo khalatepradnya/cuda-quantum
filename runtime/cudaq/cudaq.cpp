@@ -416,6 +416,18 @@ bool kernelHasConditionalFeedback(const std::string &kernelName) {
          quakeCode.find("qubitMeasurementFeedback = true") != std::string::npos;
 }
 
+std::pair<std::size_t, std::vector<std::size_t>>
+get_kernel_return_type_layout(const std::string &kernelName) {
+  auto kernelNamePrefix = kernelName + '.';
+  std::shared_lock<std::shared_mutex> lock(globalRegistryMutex);
+  auto it = std::find_if(
+      returnTypeLayoutRegistry.begin(), returnTypeLayoutRegistry.end(),
+      [&](const auto &pair) { return pair.first == kernelName; });
+  if (it != returnTypeLayoutRegistry.end())
+    return it->second;
+  return {0, {}};
+}
+
 // Ignore warnings about deprecations in platform.set_shots and
 // platform.clear_shots because the functions that are using them here
 // (cudaq::set_shots and cudaq::clear_shots are also deprecated and will be
