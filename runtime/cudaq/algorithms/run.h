@@ -106,6 +106,17 @@ run(std::size_t shots, QuantumKernel &&kernel, ARGS &&...args) {
   if (shots == 0)
     return {};
 
+  using ResultTy =
+      std::invoke_result_t<std::decay_t<QuantumKernel>, std::decay_t<ARGS>...>;
+
+#if defined(CUDAQ_LIBRARY_MODE) && !defined(CUDAQ_REMOTE_SIM)
+  std::vector<ResultTy> results;
+  for (std::size_t i = 0; i < shots; ++i)
+    results.emplace_back(cudaq::invokeKernel(
+        std::forward<QuantumKernel>(kernel), std::forward<ARGS>(args)...));
+  return results;
+#endif
+
   // Launch the kernel in the appropriate context.
   auto &platform = cudaq::get_platform();
   std::string kernelName{cudaq::getKernelName(kernel)};
@@ -115,8 +126,6 @@ run(std::size_t shots, QuantumKernel &&kernel, ARGS &&...args) {
                             std::forward<ARGS>(args)...);
       },
       platform, kernelName, shots);
-  using ResultTy =
-      std::invoke_result_t<std::decay_t<QuantumKernel>, std::decay_t<ARGS>...>;
   return {reinterpret_cast<ResultTy *>(span.data),
           reinterpret_cast<ResultTy *>(span.data + span.lengthInBytes)};
 }
