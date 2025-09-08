@@ -2269,8 +2269,9 @@ bool QuakeBridgeVisitor::VisitCallExpr(clang::CallExpr *x) {
     }
 
     // Finally, flag the call as an error except anything in cudaq::solvers or
-    // cudaq::qec.
-    if (!isInNamespace(func, "solvers") && !isInNamespace(func, "qec")) {
+    // cudaq::qec, or cudaq::qed
+    if (!isInNamespace(func, "solvers") && !isInNamespace(func, "qec") &&
+        !isInNamespace(func, "qed")) {
       TODO_loc(loc, "unknown function, " + funcName + ", in cudaq namespace");
     }
   } // end in cudaq namespace
