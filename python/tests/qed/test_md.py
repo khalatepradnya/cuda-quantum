@@ -8,7 +8,10 @@
 
 import pytest
 import cudaq
-import numpy as np
+# import cudaq_qed
+from cudaq import qed
+
+# cudaq_qed = pytest.importorskip('cudaq_qed')
 
 @pytest.fixture(autouse=True)
 def do_something():
@@ -21,10 +24,10 @@ def test_single_qubit():
     def kernel() -> int:
         q = cudaq.qubit()
         h(q)
-        if cudaq.qed.md(q):
+        if qed.md(q):
             return -1
         return mz(q)
-    
+
     results = cudaq.run(kernel, shots_count=10)
     print (results)
 
