@@ -9,9 +9,11 @@
 import pytest
 import cudaq
 # import cudaq_qed
-from cudaq import qed
+try:
+    from cudaq import qed
+except ImportError:
+    pytest.skip("qed module not found", allow_module_level=True)
 
-# cudaq_qed = pytest.importorskip('cudaq_qed')
 
 @pytest.fixture(autouse=True)
 def do_something():

@@ -13,7 +13,7 @@
 __qpu__ bool cudaq::qed::md(cudaq::qubit &q) { return false; }
 
 __qpu__ std::vector<bool> cudaq::qed::md(cudaq::qview<> q) {
-  // NOTE: The following doesn't compile
+  /// NOTE: The following doesn't compile
   // return std::vector<bool>(q.size(), false);
   std::vector<bool> results(q.size());
   for (int i = 0; i < q.size(); i++) {

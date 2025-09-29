@@ -11,7 +11,7 @@
 #include <cudaq.h>
 #include <cudaq/qed/error_detection.h>
 
-__qpu__ int kernel() {
+__qpu__ int foo() {
   cudaq::qubit q;
   h(q);
   if (cudaq::qed::md(q)) {
@@ -21,7 +21,7 @@ __qpu__ int kernel() {
 }
 
 int main() {
-  auto results = cudaq::run(10, kernel);
+  auto results = cudaq::run(10, foo);
   for (auto r : results) {
     printf("Result: %d\n", r);
   }
