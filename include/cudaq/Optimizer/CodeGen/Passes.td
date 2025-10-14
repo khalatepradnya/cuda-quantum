@@ -131,6 +131,17 @@ def QIRToQIRProfile : Pass<"convert-to-qir-profile"> {
   let constructor = "cudaq::opt::createQIRToQIRProfilePass(\"qir-base\")";
 }
 
+def QIRPatternAnalysis : Pass<"qir-pattern-analysis", "mlir::func::FuncOp"> {
+  let summary = "Analyze instruction patterns and insert new instructions for QIR";
+  let description = [{
+    This pass performs analysis on the instruction patterns between QIR prep and 
+    conversion passes, then inserts necessary instructions based on the analysis.
+  }];
+  let dependentDialects = ["quake::QuakeDialect", "cudaq::cc::CCDialect", 
+      "mlir::LLVM::LLVMDialect"];
+  let constructor = "cudaq::opt::createQIRPatternAnalysis()";
+}
+
 def RemoveMeasurements : Pass<"remove-measurements"> {
   let summary =
     "Remove measurements and output recording calls from a QIR program";

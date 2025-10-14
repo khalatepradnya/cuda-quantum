@@ -1,0 +1,30 @@
+// ========================================================================== //
+// Copyright (c) 2025 NVIDIA Corporation & Affiliates.                        //
+// All rights reserved.                                                       //
+//                                                                            //
+// This source code and the accompanying materials are made available under   //
+// the terms of the Apache License 2.0 which accompanies this distribution.   //
+// ========================================================================== //
+
+// RUN: cudaq-opt --qir-pattern-analysis %s
+
+  func.func @__nvqpp__mlirgen__function_bell._Z4bellv() attributes {"cudaq-entrypoint", "cudaq-kernel"} {
+    %0 = quake.alloca !quake.veq<2> {StartingOffset = 0 : i64}
+    %1 = quake.extract_ref %0[0] : (!quake.veq<2>) -> !quake.ref
+    quake.h %1 : (!quake.ref) -> ()
+    %2 = quake.extract_ref %0[1] : (!quake.veq<2>) -> !quake.ref
+    quake.x [%1] %2 : (!quake.ref, !quake.ref) -> ()
+    %3 = cc.alloca !cc.array<i8 x 2>
+    %4 = cc.cast %3 : (!cc.ptr<!cc.array<i8 x 2>>) -> !cc.ptr<i8>
+    %5 = cc.compute_ptr %3[1] : (!cc.ptr<!cc.array<i8 x 2>>) -> !cc.ptr<i8>
+    %measOut = quake.mz %1 name "r00000" : (!quake.ref) -> !quake.measure {ResultIndex = 0 : i64}
+    %6 = quake.discriminate %measOut : (!quake.measure) -> i1
+    %7 = cc.cast unsigned %6 : (i1) -> i8
+    cc.store %7, %4 : !cc.ptr<i8>
+    %measOut_0 = quake.mz %2 name "r00001" : (!quake.ref) -> !quake.measure {ResultIndex = 1 : i64}
+    %8 = quake.discriminate %measOut_0 : (!quake.measure) -> i1
+    %9 = cc.cast unsigned %8 : (i1) -> i8
+    cc.store %9, %5 : !cc.ptr<i8>
+    quake.dealloc %0 : !quake.veq<2>
+    return
+  }

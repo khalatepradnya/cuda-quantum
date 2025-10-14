@@ -23,6 +23,7 @@ add_cudaq_library(OptCodeGen
   OptUtils.cpp
   Passes.cpp
   Pipelines.cpp
+  QIRPatternAnalysis.cpp
   QuakeToCodegen.cpp
   QuakeToExecMgr.cpp
   QuakeToLLVM.cpp
