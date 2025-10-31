@@ -34,6 +34,34 @@ auto kernel_with_args = [](int num_qubits) __qpu__ {
   return empty{};
 };
 
+__qpu__ std::int8_t simple_int8() {
+  return 13;
+}
+
+__qpu__ std::int16_t simple_int16() {
+  return 32000;
+}
+
+__qpu__ std::int32_t simple_int32() {
+  return 2000000000;
+}
+
+__qpu__ std::int64_t simple_int64() {
+  return 9000000000000000000;
+}
+
+__qpu__ std::size_t simple_size_t() {
+  return 123456789;
+}
+
+__qpu__ std::int8_t incrementer_int8(std::int8_t val) {
+  return val + 1;
+}
+
+__qpu__ std::int64_t incrementer_int64(std::int64_t val) {
+  return val + 1;
+}
+
 int main() {
   int c = 0;
   {
@@ -101,18 +129,61 @@ int main() {
       c = 0;
       for (auto i : results)
         printf("%d: %s\n", c++, i ? "true" : "false");
-      printf("success!\n");
+      printf("success - bool_test\n");
     }
   }
   {
     auto results = cudaq::run(5, kernel);
     // Test here is that this does not crash.
-    printf("success!\n");
+    printf("success - kernel returning empty struct\n");
   }
   {
     auto results = cudaq::run(1, kernel_with_args, 4);
     // Test here is that this does not crash.
-    printf("success!\n");
+    printf("success - kernel_with_args\n");
+  }
+  std::size_t shots = 2;
+  {
+    const auto results = cudaq::run(shots, simple_int8);
+    c = 0;
+    for (auto i : results)
+      printf("%d: %d\n", c++, i);
+  }
+  {
+    const auto results = cudaq::run(shots, simple_int16);
+    c = 0;
+    for (auto i : results)
+      printf("%d: %d\n", c++, i);
+  }
+  {
+    const auto results = cudaq::run(shots, simple_int32);
+    c = 0;
+    for (auto i : results)
+      printf("%d: %d\n", c++, i);
+  }
+  {
+    const auto results = cudaq::run(shots, simple_int64);
+    c = 0;
+    for (auto i : results)
+      printf("%d: %ld\n", c++, i);
+  }
+  {
+    const auto results = cudaq::run(shots, simple_size_t);
+    c = 0;
+    for (auto i : results)
+      printf("%d: %zu\n", c++, i);
+  }
+  {
+    const auto results = cudaq::run(shots, incrementer_int8, 41);
+    c = 0;
+    for (auto i : results)
+      printf("%d: %d\n", c++, i);
+  }
+  {
+    const auto results = cudaq::run(shots, incrementer_int64, 90000000000000000);
+    c = 0;
+    for (auto i : results)
+      printf("%d: %ld\n", c++, i);
   }
   return 0;
 }
@@ -144,6 +215,20 @@ int main() {
 // CHECK: 2: true
 // CHECK: 3: true
 // CHECK: 4: true
-// CHECK: success!
-// CHECK: success!
-// CHECK: success!
+// CHECK: success - bool_test
+// CHECK: success - kernel returning empty struct
+// CHECK: success - kernel_with_args
+// CHECK: 0: 13
+// CHECK: 1: 13
+// CHECK: 0: 32000
+// CHECK: 1: 32000
+// CHECK: 0: 2000000000
+// CHECK: 1: 2000000000
+// CHECK: 0: 9000000000000000000
+// CHECK: 1: 9000000000000000000
+// CHECK: 0: 123456789
+// CHECK: 1: 123456789
+// CHECK: 0: 42
+// CHECK: 1: 42
+// CHECK: 0: 90000000000000001
+// CHECK: 1: 90000000000000001
