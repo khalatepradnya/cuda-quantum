@@ -14,6 +14,7 @@
 #include "cudaq/platform/quantum_platform.h"
 #include "cudaq/qis/qubit_qis.h"
 #include "cudaq/runtime/logger/logger.h"
+#include "cudaq/simulators.h"
 #include "cudaq/utils/cudaq_utils.h"
 #include <filesystem>
 #include <fstream>
@@ -60,6 +61,8 @@ public:
 
   void endExecution() override {
     cudaq::getExecutionContext()->executionManager->endExecution();
+    if (auto *sim = nvqir::getCircuitSimulatorInternal())
+      setMetadata(sim->getMetadata());
   }
 
   void

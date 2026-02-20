@@ -16,6 +16,7 @@
 #include "cudaq/remote_capabilities.h"
 #include "cudaq/utils/cudaq_utils.h"
 #include "nvqpp_interface.h"
+#include <any>
 #include <cstring>
 #include <cxxabi.h>
 #include <functional>
@@ -226,6 +227,16 @@ public:
   /// set.
   virtual void onRandomSeedSet(std::size_t seed);
 
+  /// @brief Query backend-specific metadata by type from the QPU at @p qpu_id.
+  /// Returns nullptr if the backend did not produce metadata of type T.
+  template <typename T>
+  const T *query(std::size_t qpu_id = 0) const {
+    const std::any *raw = queryMetadataRaw(qpu_id);
+    if (!raw)
+      return nullptr;
+    return std::any_cast<T>(raw);
+  }
+
   /// @brief Turn off any custom logging stream.
   void resetLogStream();
 
@@ -264,6 +275,10 @@ protected:
 private:
   // Helper to validate QPU Id
   void validateQpuId(std::size_t qpuId) const;
+
+  /// Non-template bridge for query<T>(). Implemented in .cpp where QPU is
+  /// fully defined.
+  const std::any *queryMetadataRaw(std::size_t qpu_id) const;
 };
 
 /// Entry point for the auto-generated kernel execution path. TODO: Needs to be

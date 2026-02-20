@@ -6,6 +6,7 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
+#include "StimMeasurementData.h"
 #include "common/FmtCore.h"
 #include "nvqir/CircuitSimulator.h"
 #include "stim.h"
@@ -39,6 +40,15 @@ protected:
 
   /// @brief Number of measurements performed so far.
   std::size_t num_measurements = 0;
+
+  /// @brief Per-measurement metadata for the current execution, keyed by
+  /// uniqueId.
+  std::unordered_map<int, cudaq::StimMeasurementData::MeasurementInfo>
+      measurementInfos;
+
+  /// @brief Snapshot of measurement metadata that persists across shots.
+  /// Updated at the end of each shot's measurement cycle.
+  cudaq::StimMeasurementData cachedMeasurementData;
 
   /// @brief Top-level random engine. Stim simulator RNGs are based off of this
   /// engine.
@@ -258,6 +268,8 @@ protected:
 
   /// @brief Reset the qubit state.
   void deallocateStateImpl() override {
+    if (num_measurements > 0)
+      cachedMeasurementData.measurements = measurementInfos;
     tableau.reset();
     // Update the randomEngine so that future invocations will use the updated
     // RNG state.
@@ -265,6 +277,7 @@ protected:
       randomEngine = std::move(sampleSim->rng);
     sampleSim.reset();
     num_measurements = 0;
+    measurementInfos.clear();
     msm_err_count = 0;
     msm_id_counter = 0;
     is_msm_mode = false;
@@ -467,7 +480,10 @@ protected:
     }
     tableau->measurement_record.clear();
     sampleSim->m_record.clear();
+    if (num_measurements > 0)
+      cachedMeasurementData.measurements = measurementInfos;
     num_measurements = 0;
+    measurementInfos.clear();
   }
 
   /// @brief Override the calculateStateDim because this is not a state vector
@@ -481,7 +497,10 @@ protected:
     // Perform measurement
     applyOpToSims(
         "M", std::vector<std::uint32_t>{static_cast<std::uint32_t>(index)});
+
+    int measId = static_cast<int>(num_measurements);
     num_measurements++;
+    measurementInfos[measId] = {index};
 
     // Get the tableau bit that was just generated.
     const std::vector<bool> &v = tableau->measurement_record.storage;
@@ -550,7 +569,11 @@ public:
     assert(shots <= sampleSim->batch_size);
     std::vector<std::uint32_t> stimTargetQubits(qubits.begin(), qubits.end());
     applyOpToSims("M", stimTargetQubits);
-    num_measurements += stimTargetQubits.size();
+    for (auto q : qubits) {
+      int measId = static_cast<int>(num_measurements);
+      num_measurements++;
+      measurementInfos[measId] = {q};
+    }
 
     if (!populateResult)
       return cudaq::ExecutionResult();
@@ -595,6 +618,17 @@ public:
     ExecutionResult result(counts);
     result.sequentialData = std::move(sequentialData);
     return result;
+  }
+
+  std::any getMetadata() const override {
+    if (num_measurements > 0) {
+      cudaq::StimMeasurementData data;
+      data.measurements = measurementInfos;
+      return data;
+    }
+    if (!cachedMeasurementData.measurements.empty())
+      return cachedMeasurementData;
+    return {};
   }
 
   bool isStateVectorSimulator() const override { return false; }

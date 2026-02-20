@@ -97,6 +97,11 @@ void quantum_platform::validateQpuId(std::size_t qpuId) const {
   }
 }
 
+const std::any *quantum_platform::queryMetadataRaw(std::size_t qpu_id) const {
+  validateQpuId(qpu_id);
+  return platformQPUs[qpu_id]->queryRaw();
+}
+
 // [remove at]: runtime refactor release
 // Deprecated: Use with_execution_context instead.
 void quantum_platform::set_exec_ctx(ExecutionContext *ctx) {

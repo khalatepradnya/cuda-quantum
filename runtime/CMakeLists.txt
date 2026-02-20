@@ -26,4 +26,6 @@ install (FILES nvqir/CircuitSimulator.h
                nvqir/QIRTypes.h
                nvqir/Gates.h
         DESTINATION include/nvqir)
+install (FILES nvqir/stim/StimMeasurementData.h
+        DESTINATION include/nvqir/stim)
 install (FILES cudaq.h DESTINATION include)

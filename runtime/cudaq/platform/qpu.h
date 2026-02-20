@@ -17,6 +17,7 @@
 #include "cudaq/remote_capabilities.h"
 #include "cudaq/runtime/logger/logger.h"
 #include "cudaq/utils/cudaq_utils.h"
+#include <any>
 
 namespace mlir {
 class ModuleOp;
@@ -50,6 +51,10 @@ protected:
 
   /// @brief Noise model specified for QPU execution.
   const noise_model *noiseModel = nullptr;
+
+  /// @brief Type-erased metadata slot. Backends populate via getMetadata()
+  /// during endExecution(); host code retrieves it via query<T>().
+  std::any metadata;
 
   /// @brief Check if the current execution context is a `spin_op` observation
   /// and perform state-preparation circuit measurement based on the `spin_op`
@@ -216,6 +221,23 @@ public:
   /// @brief Notify the QPU that a new random seed value is set.
   /// By default do nothing, let subclasses override.
   virtual void onRandomSeedSet(std::size_t seed) {}
+
+  /// @brief Store backend-specific metadata (overwrites any previous value).
+  void setMetadata(std::any data) { metadata = std::move(data); }
+
+  /// @brief Query backend-specific metadata by type. Returns nullptr if the
+  /// stored metadata is empty or does not match type T.
+  template <typename T>
+  const T *query() const {
+    return std::any_cast<T>(&metadata);
+  }
+
+  /// @brief Non-template metadata access. Returns pointer to the std::any
+  /// slot, which may be empty.
+  const std::any *queryRaw() const { return &metadata; }
+
+  /// @brief Clear metadata.
+  void clearMetadata() { metadata.reset(); }
 };
 
 struct ModuleLauncher : public registry::RegisteredType<ModuleLauncher> {

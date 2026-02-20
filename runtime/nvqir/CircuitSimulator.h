@@ -17,6 +17,7 @@
 #include "common/Timing.h"
 #include "cudaq/host_config.h"
 #include "cudaq/runtime/logger/logger.h"
+#include <any>
 #include <concepts>
 #include <cstdarg>
 #include <cstddef>
@@ -398,6 +399,11 @@ public:
   /// Determine the (preferred) precision of the simulator.
   virtual bool isSinglePrecision() const = 0;
   bool isDoublePrecision() const { return !isSinglePrecision(); }
+
+  /// @brief Return backend-specific metadata produced during execution.
+  /// Returns empty std::any by default. Backends override to return their
+  /// metadata type (e.g., StimMeasurementData).
+  virtual std::any getMetadata() const { return {}; }
 
   /// A string containing the output logging of a kernel launched with
   /// `cudaq::run()`.

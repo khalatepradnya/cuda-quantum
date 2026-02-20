@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <climits>
+
 namespace cudaq {
 
 extern "C" {
@@ -23,8 +25,9 @@ private:
   /// The intrinsic measurement result
   int result = 0;
 
-  /// Unique integer for measure result identification
-  int uniqueId = -1; // unassigned
+  /// Unique integer for measure result identification.
+  /// INT_MAX means unassigned; negative values are valid (e.g., Stim lookback).
+  int uniqueId = INT_MAX;
 
 public:
   // Constructors
