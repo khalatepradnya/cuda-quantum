@@ -20,8 +20,26 @@ struct single_measure {
   auto operator()() __qpu__ {
     cudaq::qvector q(2);
     h(q[0]);
-    cx(q[0], q[1]);
+    x<cudaq::ctrl>(q[0], q[1]);
     return mz(q[0]);
+  }
+};
+
+struct no_return {
+  auto operator()() __qpu__ {
+    cudaq::qvector q(2);
+    h(q[0]);
+    x<cudaq::ctrl>(q[0], q[1]);
+  }
+};
+
+struct single_qubit_multi_measure {
+  auto operator()() __qpu__ {
+    cudaq::qubit q;
+    h(q);
+    mz(q);
+    x(q);
+    mz(q);
   }
 };
 
@@ -36,12 +54,12 @@ struct multi_measure {
 
 int main() {
   auto &platform = cudaq::get_platform();
-  int nShots = 5;
+  std::size_t nShots = 5;
 
   // Test 1: Single measure_result return
   {
     auto results = cudaq::run(nShots, single_measure{});
-    assert(results.size() == static_cast<std::size_t>(nShots));
+    assert(results.size() == nShots);
 
     for (auto &m : results) {
       assert(m.getResult() == 0 || m.getResult() == 1);
@@ -54,6 +72,50 @@ int main() {
     auto *info = meta->lookup(0);
     assert(info != nullptr);
     assert(info->qubit_index == 0);
+  }
+
+  // Test 1.5: Sample example
+  {
+    auto counts = cudaq::sample(nShots, no_return{});
+    counts.dump();
+    auto *meta = platform.query<cudaq::StimMeasurementData>();
+    // We get the metadata
+    assert(meta != nullptr);
+    // We get two measurements (one for each qubit)
+    assert(meta->measurements.size() == 2);
+    printf("Metadata for no_return:\n");
+    for (const auto &[id, info] : meta->measurements) {
+      printf("  uniqueId: %d, qubit_index: %zu\n", id, info.qubit_index);
+    }
+    /*
+    { 00:2 11:3 }
+    Metadata for no_return:
+      uniqueId: 1, qubit_index: 1
+      uniqueId: 0, qubit_index: 0
+    */
+  }
+
+  // Test 1.75 Sample with explicit measurements
+  {
+    cudaq::sample_options options{.shots = nShots,
+                                  .explicit_measurements = true};
+    auto counts = cudaq::sample(options, single_qubit_multi_measure{});
+    counts.dump();
+    auto *meta = platform.query<cudaq::StimMeasurementData>();
+    // We get the metadata
+    assert(meta != nullptr);
+    // We get two measurements (one for each mz)
+    assert(meta->measurements.size() == 2);
+    printf("Metadata for single_qubit_multi_measure:\n");
+    for (const auto &[id, info] : meta->measurements) {
+      printf("  uniqueId: %d, qubit_index: %zu\n", id, info.qubit_index);
+    }
+    /*
+    { 01:2 10:3 }
+    Metadata for single_qubit_multi_measure:
+      uniqueId: 1, qubit_index: 0
+      uniqueId: 0, qubit_index: 0
+    */
   }
 
   // Test 2: Vector of measure_result return
@@ -82,7 +144,7 @@ int main() {
   // array-local index as uniqueId. With two mz(q) calls on 2 qubits,
   // the first array gets {0, 1} and the second also gets {0, 1} instead
   // of {2, 3}. The Stim backend assigns correct global IDs internally but the
-  // record parser is not using this , and simply substitutes array-local
+  // record parser is not using this, and simply substitutes array-local
   // indices.
   //
   {
