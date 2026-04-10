@@ -421,25 +421,31 @@ void exp_pauli(QuantumRegister &ctrls, double theta, const char *pauliWord,
                                false, spin_op::from_word(pauliWord));
 }
 
+namespace details {
+inline thread_local std::int64_t measurement_counter = 0;
+inline void resetMeasurementCounter() { measurement_counter = 0; }
+inline std::int64_t nextMeasurementId() { return measurement_counter++; }
+} // namespace details
+
 /// @brief Measure an individual qubit, return as `measure_result`
 inline measure_result mz(qubit &q) {
-  return measure_result(
-      getExecutionManager()->measure(QuditInfo{q.n_levels(), q.id()}));
+  auto val = getExecutionManager()->measure(QuditInfo{q.n_levels(), q.id()});
+  return measure_result(val, details::nextMeasurementId());
 }
 
 /// @brief Measure an individual qubit in `x` basis, return as `measure_result`
 inline measure_result mx(qubit &q) {
   h(q);
-  return measure_result(
-      getExecutionManager()->measure(QuditInfo{q.n_levels(), q.id()}));
+  auto val = getExecutionManager()->measure(QuditInfo{q.n_levels(), q.id()});
+  return measure_result(val, details::nextMeasurementId());
 }
 
 // Measure an individual qubit in `y` basis, return as `measure_result`
 inline measure_result my(qubit &q) {
   r1(-M_PI_2, q);
   h(q);
-  return measure_result(
-      getExecutionManager()->measure(QuditInfo{q.n_levels(), q.id()}));
+  auto val = getExecutionManager()->measure(QuditInfo{q.n_levels(), q.id()});
+  return measure_result(val, details::nextMeasurementId());
 }
 
 inline void reset(qubit &q) {
@@ -549,6 +555,70 @@ to_bool_vector(const std::vector<measure_result> &results) {
   for (const auto &r : results)
     out.push_back(static_cast<bool>(r));
   return out;
+}
+
+// QEC detector and observable declarations.
+// In library mode, these dispatch to the circuit simulator.
+// In compiled mode, they are intercepted by the frontend and
+// lowered to qec.* MLIR ops.
+
+extern "C" {
+void __quantum__qis__detector(cudaq::measure_result *results,
+                              std::size_t count);
+void __quantum__qis__detectors_vectorized(cudaq::measure_result *prev,
+                                          cudaq::measure_result *curr,
+                                          std::size_t count);
+void __quantum__qis__logical_observable(cudaq::measure_result *results,
+                                        std::size_t count,
+                                        std::size_t observable_index);
+}
+
+extern "C" {
+const char *__nvqir__getCircuitRepr();
+}
+
+/// Get a string representation of the recorded circuit from the
+/// active backend simulator (e.g., Stim circuit text).
+inline std::string getCircuitRepr() {
+  const char *repr = __nvqir__getCircuitRepr();
+  return repr ? std::string(repr) : std::string();
+}
+
+/// Declare a detector over one or more measurement results.
+/// A detector is a parity constraint: under noise-free execution the
+/// XOR of the referenced measurements is deterministic.
+template <typename... MeasArgs>
+void detector(MeasArgs &...ms) {
+  static_assert((std::is_same_v<measure_result, MeasArgs> && ...),
+                "detector() arguments must all be measure_result");
+  measure_result arr[] = {ms...};
+  __quantum__qis__detector(arr, sizeof...(ms));
+}
+
+/// Declare a detector from a vector of measurement results.
+inline void detector(const std::vector<measure_result> &ms) {
+  std::vector<measure_result> copy(ms.begin(), ms.end());
+  __quantum__qis__detector(copy.data(), copy.size());
+}
+
+/// Declare N detectors by pairing two measurement vectors element-wise.
+/// This is the standard form for cross-round detectors.
+inline void detectors_vectorized(const std::vector<measure_result> &prev,
+                                 const std::vector<measure_result> &curr) {
+  if (prev.size() != curr.size())
+    throw std::runtime_error(
+        "detectors_vectorized: prev and curr must have equal length");
+  std::vector<measure_result> p(prev.begin(), prev.end());
+  std::vector<measure_result> c(curr.begin(), curr.end());
+  __quantum__qis__detectors_vectorized(p.data(), c.data(), p.size());
+}
+
+/// Declare a logical observable over measurement results.
+inline void logical_observable(const std::vector<measure_result> &ms,
+                               std::size_t observable_index = 0) {
+  std::vector<measure_result> copy(ms.begin(), ms.end());
+  __quantum__qis__logical_observable(copy.data(), copy.size(),
+                                     observable_index);
 }
 
 // This concept tests if `Kernel` is a `Callable` that takes the arguments,

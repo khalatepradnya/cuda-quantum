@@ -16,6 +16,7 @@
 #include "common/SampleResult.h"
 #include "common/Timing.h"
 #include "cudaq/host_config.h"
+#include "cudaq/qis/measure_result.h"
 #include "cudaq/runtime/logger/logger.h"
 #include <concepts>
 #include <cstdarg>
@@ -393,6 +394,27 @@ public:
   virtual cudaq::ExecutionResult
   sample(const std::vector<std::size_t> &qubitIdxs, const int shots,
          bool includeSequentialData = true) = 0;
+
+  /// @brief Get a string representation of the recorded circuit, including
+  /// all gates, measurements, noise, detectors, and observables.
+  /// Only meaningful for backends that record circuits (e.g., Stim).
+  virtual std::string getCircuitRepr() const { return ""; }
+
+  /// @brief Declare a detector over one or more measurement results.
+  /// Default implementation is a no-op; backends that support QEC
+  /// (e.g., Stim) override this.
+  virtual void detector(const std::vector<cudaq::measure_result> &results) {}
+
+  /// @brief Declare N detectors by pairing two measurement vectors
+  /// element-wise (cross-round detectors).
+  virtual void
+  detectors_vectorized(const std::vector<cudaq::measure_result> &prev,
+                       const std::vector<cudaq::measure_result> &curr) {}
+
+  /// @brief Declare a logical observable over measurement results.
+  virtual void
+  logical_observable(const std::vector<cudaq::measure_result> &results,
+                     std::size_t observable_index = 0) {}
 
   /// @brief Return the name of this CircuitSimulator
   virtual std::string name() const = 0;

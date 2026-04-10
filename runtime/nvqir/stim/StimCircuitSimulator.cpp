@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "common/FmtCore.h"
+#include "cudaq/qis/measure_result.h"
 #include "nvqir/CircuitSimulator.h"
 #include "stim.h"
 #include <numeric>
@@ -61,6 +62,10 @@ protected:
   /// @brief Whether or not the execution context name is "msm" (value is cached
   /// for speed)
   bool is_msm_mode = false;
+
+  /// @brief Accumulated Stim circuit for DEM generation.
+  /// Records all gates, measurements, noise, detectors, and observables.
+  stim::Circuit recordedCircuit;
 
   std::optional<StimNoiseType>
   isValidStimNoiseChannel(const kraus_channel &channel) const {
@@ -270,9 +275,12 @@ protected:
     msm_err_count = 0;
     msm_id_counter = 0;
     is_msm_mode = false;
+    // Note: recordedCircuit is intentionally NOT cleared here so it
+    // can be read after kernel execution for DEM generation.
   }
 
-  /// @brief Apply operation to all Stim simulators.
+  /// @brief Apply operation to all Stim simulators and record to the
+  /// persistent circuit.
   void applyOpToSims(const std::string &gate_name,
                      const std::vector<uint32_t> &targets) {
     if (targets.empty())
@@ -282,6 +290,7 @@ protected:
     tempCircuit.safe_append_u(gate_name, targets);
     tableau->safe_do_circuit(tempCircuit);
     sampleSim->safe_do_circuit(tempCircuit);
+    recordedCircuit.safe_append_u(gate_name, targets);
   }
 
   /// @brief Apply the noise channel on \p qubits
@@ -384,6 +393,8 @@ protected:
         // Only apply the noise operations to the sample simulator (not the
         // Tableau simulator).
         sampleSim->safe_do_circuit(noiseOps);
+        recordedCircuit.safe_append_u(res.value().stim_name, qubits,
+                                      channel.parameters);
 
         // Increment the error count by the number of mechanisms
         msm_err_count += res->params.size();
@@ -605,6 +616,49 @@ public:
     if (includeSequentialData)
       result.sequentialData = std::move(sequentialData);
     return result;
+  }
+
+  void detector(const std::vector<cudaq::measure_result> &results) override {
+    std::vector<uint32_t> targets;
+    for (const auto &r : results) {
+      uint32_t lookback = static_cast<uint32_t>(num_measurements - r.unique_id);
+      targets.push_back(lookback | stim::TARGET_RECORD_BIT);
+    }
+    recordedCircuit.safe_append_u("DETECTOR", targets);
+  }
+
+  void detectors_vectorized(
+      const std::vector<cudaq::measure_result> &prev,
+      const std::vector<cudaq::measure_result> &curr) override {
+    if (prev.size() != curr.size())
+      throw std::runtime_error(
+          "detectors_vectorized: prev and curr must have equal length");
+    for (std::size_t i = 0; i < prev.size(); i++) {
+      std::vector<cudaq::measure_result> pair;
+      pair.push_back(prev[i]);
+      pair.push_back(curr[i]);
+      detector(pair);
+    }
+  }
+
+  void logical_observable(const std::vector<cudaq::measure_result> &results,
+                          std::size_t observable_index = 0) override {
+    std::vector<uint32_t> targets;
+    for (const auto &r : results) {
+      uint32_t lookback = static_cast<uint32_t>(num_measurements - r.unique_id);
+      targets.push_back(lookback | stim::TARGET_RECORD_BIT);
+    }
+    recordedCircuit.safe_append_ua("OBSERVABLE_INCLUDE", targets,
+                                   static_cast<double>(observable_index));
+  }
+
+  /// @brief Get the recorded Stim circuit (for DEM generation).
+  const stim::Circuit &getRecordedCircuit() const { return recordedCircuit; }
+
+  std::string getCircuitRepr() const override {
+    std::stringstream ss;
+    ss << recordedCircuit;
+    return ss.str();
   }
 
   bool isStateVectorSimulator() const override { return false; }

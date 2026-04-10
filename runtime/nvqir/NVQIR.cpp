@@ -743,6 +743,49 @@ void __quantum__qis__trap(std::int64_t code) {
   }
 }
 
+void __quantum__qis__detector(cudaq::measure_result *results,
+                              std::size_t count) {
+  std::vector<cudaq::measure_result> mrs;
+  mrs.reserve(count);
+  for (std::size_t i = 0; i < count; i++)
+    mrs.push_back(results[i]);
+  nvqir::getCircuitSimulatorInternal()->detector(mrs);
+}
+
+void __quantum__qis__detectors_vectorized(cudaq::measure_result *prev,
+                                          cudaq::measure_result *curr,
+                                          std::size_t count) {
+  std::vector<cudaq::measure_result> p, c;
+  p.reserve(count);
+  c.reserve(count);
+  for (std::size_t i = 0; i < count; i++) {
+    p.push_back(prev[i]);
+    c.push_back(curr[i]);
+  }
+  nvqir::getCircuitSimulatorInternal()->detectors_vectorized(p, c);
+}
+
+void __quantum__qis__logical_observable(cudaq::measure_result *results,
+                                        std::size_t count,
+                                        std::size_t observable_index) {
+  std::vector<cudaq::measure_result> mrs;
+  mrs.reserve(count);
+  for (std::size_t i = 0; i < count; i++)
+    mrs.push_back(results[i]);
+  nvqir::getCircuitSimulatorInternal()->logical_observable(mrs,
+                                                           observable_index);
+}
+
+// getCircuitRepr returns std::string so it cannot be extern "C".
+// We use a shared buffer to pass the string through a C-compatible interface.
+static thread_local std::string __nvqir_circuit_repr_buffer;
+
+const char *__nvqir__getCircuitRepr() {
+  __nvqir_circuit_repr_buffer =
+      nvqir::getCircuitSimulatorInternal()->getCircuitRepr();
+  return __nvqir_circuit_repr_buffer.c_str();
+}
+
 void __quantum__qis__apply_kraus_channel_double(std::int64_t krausChannelKey,
                                                 double *params,
                                                 std::size_t numParams,
