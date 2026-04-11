@@ -87,6 +87,7 @@ void createCommonTargetCodegenPipeline(
     // inline the apply calls properly.
     cudaq::opt::addAggressiveInlining(pm);
   }
+  pm.addPass(cudaq::opt::createEraseQECOps());
   cudaq::opt::addLowerToCFG(pm);
   pm.addNestedPass<func::FuncOp>(cudaq::opt::createStackFramePrealloc());
   pm.addNestedPass<func::FuncOp>(cudaq::opt::createCombineQuantumAllocations());

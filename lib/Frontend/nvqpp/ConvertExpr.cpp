@@ -11,6 +11,7 @@
 #include "cudaq/Optimizer/Builder/Factory.h"
 #include "cudaq/Optimizer/Builder/Intrinsics.h"
 #include "cudaq/Optimizer/Dialect/CC/CCOps.h"
+#include "cudaq/Optimizer/Dialect/QEC/QECOps.h"
 #include "cudaq/Optimizer/Dialect/Quake/QuakeOps.h"
 #include "llvm/Support/Debug.h"
 
@@ -2374,6 +2375,19 @@ bool QuakeBridgeVisitor::VisitCallExpr(clang::CallExpr *x) {
       if (devFuncTy.getResults().empty())
         return true;
       return pushValue(devCall.getResult(0));
+    }
+
+    if (funcName == "detector") {
+      builder.create<qec::DetectorOp>(loc, args);
+      return true;
+    }
+    if (funcName == "logical_observable") {
+      builder.create<qec::LogicalObservableOp>(loc, args);
+      return true;
+    }
+    if (funcName == "detectors_vectorized" && args.size() == 2) {
+      builder.create<qec::DetectorsVectorizedOp>(loc, args[0], args[1]);
+      return true;
     }
 
     // Finally, flag the call as an error except anything in cudaq::solvers or

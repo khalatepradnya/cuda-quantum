@@ -613,7 +613,16 @@ inline void detectors_vectorized(const std::vector<measure_result> &prev,
   __quantum__qis__detectors_vectorized(p.data(), c.data(), p.size());
 }
 
-/// Declare a logical observable over measurement results.
+/// Declare a logical observable over one or more measurement results.
+template <typename... MeasArgs>
+void logical_observable(MeasArgs &...ms) {
+  static_assert((std::is_same_v<measure_result, MeasArgs> && ...),
+                "logical_observable() arguments must all be measure_result");
+  measure_result arr[] = {ms...};
+  __quantum__qis__logical_observable(arr, sizeof...(ms), 0);
+}
+
+/// Declare a logical observable from a vector of measurement results.
 inline void logical_observable(const std::vector<measure_result> &ms,
                                std::size_t observable_index = 0) {
   std::vector<measure_result> copy(ms.begin(), ms.end());

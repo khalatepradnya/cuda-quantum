@@ -431,6 +431,16 @@ def DistributedDeviceCall : Pass<"distributed-device-call", "mlir::ModuleOp"> {
   ];
 }
 
+def EraseQECOps : Pass<"erase-qec-ops"> {
+  let summary = "Erase QEC operations (detectors, logical observables).";
+  let description = [{
+    Removes all qec.detector, qec.detectors_vectorized, and
+    qec.logical_observable operations from the IR. This pass is run when
+    targeting backends that do not support QEC annotations, such as standard
+    hardware backends or simulators without detector support.
+  }];
+}
+
 def EraseNoise : Pass<"erase-noise"> {
   let summary = "Erase the injection of noise via Kraus channels.";
   let description = [{

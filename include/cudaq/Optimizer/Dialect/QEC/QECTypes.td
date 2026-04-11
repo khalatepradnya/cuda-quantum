@@ -1,4 +1,4 @@
-/****************************************************************-*- C++ -*-****
+/********************************************************** -*- tablegen -*- ***
  * Copyright (c) 2022 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
@@ -6,18 +6,13 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-#pragma once
+// The QEC dialect currently defines no custom types.
+// Detectors and observables operate on !quake.measure values directly.
 
-#include "mlir/CAPI/Registration.h"
+#ifndef CUDAQ_OPTIMIZER_DIALECT_QEC_TYPES
+#define CUDAQ_OPTIMIZER_DIALECT_QEC_TYPES
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+include "cudaq/Optimizer/Dialect/QEC/QECDialect.td"
+include "mlir/IR/OpBase.td"
 
-MLIR_DECLARE_CAPI_DIALECT_REGISTRATION(Quake, quake);
-MLIR_DECLARE_CAPI_DIALECT_REGISTRATION(QEC, qec);
-MLIR_DECLARE_CAPI_DIALECT_REGISTRATION(CC, cc);
-
-#ifdef __cplusplus
-}
-#endif
+#endif // CUDAQ_OPTIMIZER_DIALECT_QEC_TYPES

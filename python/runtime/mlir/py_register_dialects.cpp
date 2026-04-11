@@ -12,6 +12,7 @@
 #include "cudaq/Optimizer/Dialect/CC/CCDialect.h"
 #include "cudaq/Optimizer/Dialect/CC/CCOps.h"
 #include "cudaq/Optimizer/Dialect/CC/CCTypes.h"
+#include "cudaq/Optimizer/Dialect/QEC/QECDialect.h"
 #include "cudaq/Optimizer/Dialect/Quake/QuakeDialect.h"
 #include "cudaq/Optimizer/Dialect/Quake/QuakeTypes.h"
 #include "cudaq/Optimizer/InitAllPasses.h"
@@ -369,7 +370,8 @@ void bindRegisterDialects(py::module &mod) {
 
   mod.def("register_all_dialects", [](MlirContext context) {
     DialectRegistry registry;
-    registry.insert<quake::QuakeDialect, cudaq::cc::CCDialect>();
+    registry
+        .insert<quake::QuakeDialect, qec::QECDialect, cudaq::cc::CCDialect>();
     cudaq::opt::registerCodeGenDialect(registry);
     registerAllDialects(registry);
     auto *mlirContext = unwrap(context);

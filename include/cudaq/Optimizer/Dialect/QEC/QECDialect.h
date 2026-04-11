@@ -1,4 +1,4 @@
-/*******************************************************************************
+/****************************************************************-*- C++ -*-****
  * Copyright (c) 2022 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
@@ -6,11 +6,8 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-#include "cudaq/Optimizer/CAPI/Dialects.h"
-#include "cudaq/Optimizer/Dialect/CC/CCDialect.h"
-#include "cudaq/Optimizer/Dialect/QEC/QECDialect.h"
-#include "cudaq/Optimizer/Dialect/Quake/QuakeDialect.h"
+#pragma once
 
-MLIR_DEFINE_CAPI_DIALECT_REGISTRATION(Quake, quake, quake::QuakeDialect)
-MLIR_DEFINE_CAPI_DIALECT_REGISTRATION(QEC, qec, qec::QECDialect)
-MLIR_DEFINE_CAPI_DIALECT_REGISTRATION(CC, cc, cudaq::cc::CCDialect)
+#include "mlir/IR/Dialect.h"
+
+#include "cudaq/Optimizer/Dialect/QEC/QECDialect.h.inc"
