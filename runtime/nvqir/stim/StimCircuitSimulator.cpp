@@ -652,6 +652,30 @@ public:
                                    static_cast<double>(observable_index));
   }
 
+  void detector(const std::vector<cudaq::measure_result> &results,
+                std::size_t totalMeasurements) override {
+    std::vector<uint32_t> targets;
+    for (const auto &r : results) {
+      uint32_t lookback =
+          static_cast<uint32_t>(totalMeasurements - r.unique_id);
+      targets.push_back(lookback | stim::TARGET_RECORD_BIT);
+    }
+    recordedCircuit.safe_append_u("DETECTOR", targets);
+  }
+
+  void logical_observable(const std::vector<cudaq::measure_result> &results,
+                          std::size_t observable_index,
+                          std::size_t totalMeasurements) override {
+    std::vector<uint32_t> targets;
+    for (const auto &r : results) {
+      uint32_t lookback =
+          static_cast<uint32_t>(totalMeasurements - r.unique_id);
+      targets.push_back(lookback | stim::TARGET_RECORD_BIT);
+    }
+    recordedCircuit.safe_append_ua("OBSERVABLE_INCLUDE", targets,
+                                   static_cast<double>(observable_index));
+  }
+
   /// @brief Get the recorded Stim circuit (for DEM generation).
   const stim::Circuit &getRecordedCircuit() const { return recordedCircuit; }
 

@@ -405,6 +405,14 @@ public:
   /// (e.g., Stim) override this.
   virtual void detector(const std::vector<cudaq::measure_result> &results) {}
 
+  /// @brief Declare a detector using absolute measurement indices and the
+  /// total measurement count. Used by compiled mode where num_measurements
+  /// may not be available at call time.
+  virtual void detector(const std::vector<cudaq::measure_result> &results,
+                        std::size_t totalMeasurements) {
+    detector(results);
+  }
+
   /// @brief Declare N detectors by pairing two measurement vectors
   /// element-wise (cross-round detectors).
   virtual void
@@ -415,6 +423,15 @@ public:
   virtual void
   logical_observable(const std::vector<cudaq::measure_result> &results,
                      std::size_t observable_index = 0) {}
+
+  /// @brief Declare a logical observable using absolute measurement indices
+  /// and total measurement count.
+  virtual void
+  logical_observable(const std::vector<cudaq::measure_result> &results,
+                     std::size_t observable_index,
+                     std::size_t totalMeasurements) {
+    logical_observable(results, observable_index);
+  }
 
   /// @brief Return the name of this CircuitSimulator
   virtual std::string name() const = 0;

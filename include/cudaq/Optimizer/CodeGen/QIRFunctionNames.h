@@ -40,6 +40,12 @@ static constexpr const char QIRCustomAdjOp[] =
     "__quantum__qis__custom_unitary__adj";
 static constexpr const char QIRExpPauli[] = "__quantum__qis__exp_pauli";
 
+/// QEC runtime function names (index-based, for compiled mode)
+static constexpr const char QIRDetectorIndices[] =
+    "__quantum__qis__detector_indices";
+static constexpr const char QIRLogicalObservableIndices[] =
+    "__quantum__qis__logical_observable_indices";
+
 static constexpr const char NVQIRInvokeWithControlBits[] =
     "invokeWithControlQubits";
 static constexpr const char NVQIRInvokeRotationWithControlBits[] =

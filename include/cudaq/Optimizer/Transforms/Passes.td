@@ -431,13 +431,20 @@ def DistributedDeviceCall : Pass<"distributed-device-call", "mlir::ModuleOp"> {
   ];
 }
 
-def EraseQECOps : Pass<"erase-qec-ops"> {
-  let summary = "Erase QEC operations (detectors, logical observables).";
+def LowerQECToQIR : Pass<"lower-qec-to-qir"> {
+  let summary = "Lower QEC operations to QIR runtime calls.";
   let description = [{
-    Removes all qec.detector, qec.detectors_vectorized, and
-    qec.logical_observable operations from the IR. This pass is run when
-    targeting backends that do not support QEC annotations, such as standard
-    hardware backends or simulators without detector support.
+    Lowers qec.detector and qec.logical_observable operations to
+    func.call operations targeting __quantum__qis__detector_indices and
+    __quantum__qis__logical_observable_indices runtime functions. Each
+    measurement operand is mapped to its chronological index (assigned
+    by walking all quake.mz ops in program order). The indices are
+    passed as a stack-allocated i64 array to the runtime function.
+
+    This enables QEC annotations to reach backends that support them
+    (e.g., Stim) through the standard NVQIR dispatch mechanism.
+    Backends without QEC support have default no-op implementations
+    of these functions in CircuitSimulatorBase.
   }];
 }
 

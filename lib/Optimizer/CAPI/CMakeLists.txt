@@ -11,8 +11,10 @@ add_mlir_public_c_api_library(CUDAQuantumMLIRCAPI
 
   DEPENDS
   QuakeDialectIncGen
+  QECOpsIncGen
 
   LINK_LIBS PRIVATE 
   QuakeDialect 
   CCDialect
+  QECDialect
 )

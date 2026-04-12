@@ -69,8 +69,8 @@ CUDAQ_TEST(MeasureResultTester, checkConstructors) {
   static_assert(!std::is_default_constructible_v<cudaq::measure_result>);
   static_assert(std::is_copy_constructible_v<cudaq::measure_result>);
   static_assert(std::is_move_constructible_v<cudaq::measure_result>);
-  static_assert(!std::is_copy_assignable_v<cudaq::measure_result>);
-  static_assert(!std::is_move_assignable_v<cudaq::measure_result>);
+  static_assert(std::is_copy_assignable_v<cudaq::measure_result>);
+  static_assert(std::is_move_assignable_v<cudaq::measure_result>);
 
   cudaq::measure_result r1(int64_t(1));
   EXPECT_EQ(static_cast<int>(r1), 1);

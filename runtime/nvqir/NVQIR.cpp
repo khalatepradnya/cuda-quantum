@@ -776,6 +776,27 @@ void __quantum__qis__logical_observable(cudaq::measure_result *results,
                                                            observable_index);
 }
 
+void __quantum__qis__detector_indices(std::int64_t *indices, std::size_t count,
+                                      std::size_t total_measurements) {
+  std::vector<cudaq::measure_result> mrs;
+  mrs.reserve(count);
+  for (std::size_t i = 0; i < count; i++)
+    mrs.emplace_back(int64_t(0), indices[i]);
+  nvqir::getCircuitSimulatorInternal()->detector(mrs, total_measurements);
+}
+
+void __quantum__qis__logical_observable_indices(std::int64_t *indices,
+                                                std::size_t count,
+                                                std::size_t total_measurements,
+                                                std::size_t observable_index) {
+  std::vector<cudaq::measure_result> mrs;
+  mrs.reserve(count);
+  for (std::size_t i = 0; i < count; i++)
+    mrs.emplace_back(int64_t(0), indices[i]);
+  nvqir::getCircuitSimulatorInternal()->logical_observable(
+      mrs, observable_index, total_measurements);
+}
+
 // getCircuitRepr returns std::string so it cannot be extern "C".
 // We use a shared buffer to pass the string through a C-compatible interface.
 static thread_local std::string __nvqir_circuit_repr_buffer;
