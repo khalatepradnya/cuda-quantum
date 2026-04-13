@@ -37,8 +37,8 @@ public:
     });
     for (auto *dead : toErase)
       dead->erase();
-    LLVM_DEBUG(llvm::dbgs() << "EraseQEC: erased " << toErase.size()
-                            << " ops\n");
+    LLVM_DEBUG(llvm::dbgs()
+               << "EraseQEC: erased " << toErase.size() << " ops\n");
   }
 };
 } // namespace

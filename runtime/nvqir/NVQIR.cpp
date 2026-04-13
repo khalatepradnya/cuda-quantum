@@ -770,34 +770,23 @@ void __quantum__qis__trap(std::int64_t code) {
 
 void __quantum__qis__detector(cudaq::measure_result *results,
                               std::size_t count) {
-  std::vector<cudaq::measure_result> mrs;
-  mrs.reserve(count);
-  for (std::size_t i = 0; i < count; i++)
-    mrs.push_back(results[i]);
-  nvqir::getCircuitSimulatorInternal()->detector(mrs);
+  auto mv = cudaq::make_measure_vector(results, count);
+  nvqir::getCircuitSimulatorInternal()->detector(mv);
 }
 
 void __quantum__qis__detectors_vectorized(cudaq::measure_result *prev,
                                           cudaq::measure_result *curr,
                                           std::size_t count) {
-  std::vector<cudaq::measure_result> p, c;
-  p.reserve(count);
-  c.reserve(count);
-  for (std::size_t i = 0; i < count; i++) {
-    p.push_back(prev[i]);
-    c.push_back(curr[i]);
-  }
+  auto p = cudaq::make_measure_vector(prev, count);
+  auto c = cudaq::make_measure_vector(curr, count);
   nvqir::getCircuitSimulatorInternal()->detectors_vectorized(p, c);
 }
 
 void __quantum__qis__logical_observable(cudaq::measure_result *results,
                                         std::size_t count,
                                         std::size_t observable_index) {
-  std::vector<cudaq::measure_result> mrs;
-  mrs.reserve(count);
-  for (std::size_t i = 0; i < count; i++)
-    mrs.push_back(results[i]);
-  nvqir::getCircuitSimulatorInternal()->logical_observable(mrs,
+  auto mv = cudaq::make_measure_vector(results, count);
+  nvqir::getCircuitSimulatorInternal()->logical_observable(mv,
                                                            observable_index);
 }
 
@@ -806,33 +795,39 @@ void __quantum__qis__logical_observable(cudaq::measure_result *results,
 // functions. The QPU resolves measurement identity at runtime via
 // resultPtrToChronoIdx, eliminating compiler-side index resolution.
 
-void __quantum__qis__detector_from_results(Result **results,
-                                           std::int64_t count) {
-  std::vector<cudaq::measure_result> mrs;
-  mrs.reserve(count);
+// Helper: build a measure_result storage vector from Result** + count and
+// return a measure_vector view over it. The caller owns the storage vector
+// and must keep it alive for the lifetime of the returned measure_vector.
+static std::vector<cudaq::measure_result>
+buildMeasureStorage(Result **results, std::int64_t count) {
+  std::vector<cudaq::measure_result> storage;
+  storage.reserve(count);
   for (std::int64_t i = 0; i < count; i++) {
     auto it = resultPtrToChronoIdx.find(results[i]);
     std::size_t idx = (it != resultPtrToChronoIdx.end()) ? it->second : 0;
-    mrs.push_back(cudaq::measure_result::make(*results[i], idx));
+    storage.push_back(cudaq::measure_result::make(*results[i], idx));
   }
-  nvqir::getCircuitSimulatorInternal()->detector(mrs, measChronoCounter);
+  return storage;
+}
+
+void __quantum__qis__detector_from_results(Result **results,
+                                           std::int64_t count) {
+  auto storage = buildMeasureStorage(results, count);
+  auto mv = cudaq::make_measure_vector(storage.data(), storage.size());
+  nvqir::getCircuitSimulatorInternal()->detector(mv);
 }
 
 void __quantum__qis__logical_observable_from_results(
     Result **results, std::int64_t count, std::int64_t observable_index) {
-  std::vector<cudaq::measure_result> mrs;
-  mrs.reserve(count);
-  for (std::int64_t i = 0; i < count; i++) {
-    auto it = resultPtrToChronoIdx.find(results[i]);
-    std::size_t idx = (it != resultPtrToChronoIdx.end()) ? it->second : 0;
-    mrs.push_back(cudaq::measure_result::make(*results[i], idx));
-  }
-  nvqir::getCircuitSimulatorInternal()->logical_observable(
-      mrs, observable_index, measChronoCounter);
+  auto storage = buildMeasureStorage(results, count);
+  auto mv = cudaq::make_measure_vector(storage.data(), storage.size());
+  nvqir::getCircuitSimulatorInternal()->logical_observable(mv,
+                                                           observable_index);
 }
 
-void __quantum__qis__detectors_vectorized_from_results(
-    Result **prev_results, Result **curr_results, std::int64_t count) {
+void __quantum__qis__detectors_vectorized_from_results(Result **prev_results,
+                                                       Result **curr_results,
+                                                       std::int64_t count) {
   for (std::int64_t i = 0; i < count; i++) {
     auto prevIt = resultPtrToChronoIdx.find(prev_results[i]);
     auto currIt = resultPtrToChronoIdx.find(curr_results[i]);
@@ -840,10 +835,11 @@ void __quantum__qis__detectors_vectorized_from_results(
         (prevIt != resultPtrToChronoIdx.end()) ? prevIt->second : 0;
     std::size_t currIdx =
         (currIt != resultPtrToChronoIdx.end()) ? currIt->second : 0;
-    std::vector<cudaq::measure_result> pair = {
+    cudaq::measure_result pair[2] = {
         cudaq::measure_result::make(*prev_results[i], prevIdx),
         cudaq::measure_result::make(*curr_results[i], currIdx)};
-    nvqir::getCircuitSimulatorInternal()->detector(pair, measChronoCounter);
+    auto mv = cudaq::make_measure_vector(pair, 2);
+    nvqir::getCircuitSimulatorInternal()->detector(mv);
   }
 }
 
@@ -851,40 +847,42 @@ void __quantum__qis__detectors_vectorized_from_results(
 // !quake.measurements<N>. The Array contains Result* elements.
 
 static std::vector<cudaq::measure_result>
-arrayToMeasureResults(Array *results) {
+arrayToMeasureStorage(Array *results) {
   auto count = results->size();
-  std::vector<cudaq::measure_result> mrs;
-  mrs.reserve(count);
+  std::vector<cudaq::measure_result> storage;
+  storage.reserve(count);
   for (std::size_t i = 0; i < count; i++) {
     auto *elemPtr = (*results)[i];
     auto *result = *reinterpret_cast<Result **>(elemPtr);
     auto it = resultPtrToChronoIdx.find(result);
     std::size_t idx = (it != resultPtrToChronoIdx.end()) ? it->second : 0;
-    mrs.push_back(cudaq::measure_result::make(*result, idx));
+    storage.push_back(cudaq::measure_result::make(*result, idx));
   }
-  return mrs;
+  return storage;
 }
 
 void __quantum__qis__detector_from_array(Array *results) {
-  auto mrs = arrayToMeasureResults(results);
-  nvqir::getCircuitSimulatorInternal()->detector(mrs, measChronoCounter);
+  auto storage = arrayToMeasureStorage(results);
+  auto mv = cudaq::make_measure_vector(storage.data(), storage.size());
+  nvqir::getCircuitSimulatorInternal()->detector(mv);
 }
 
 void __quantum__qis__logical_observable_from_array(Array *results,
                                                    std::int64_t obsIdx) {
-  auto mrs = arrayToMeasureResults(results);
-  nvqir::getCircuitSimulatorInternal()->logical_observable(mrs, obsIdx,
-                                                           measChronoCounter);
+  auto storage = arrayToMeasureStorage(results);
+  auto mv = cudaq::make_measure_vector(storage.data(), storage.size());
+  nvqir::getCircuitSimulatorInternal()->logical_observable(mv, obsIdx);
 }
 
 void __quantum__qis__detectors_vectorized_from_arrays(Array *prev,
                                                       Array *curr) {
-  auto prevMrs = arrayToMeasureResults(prev);
-  auto currMrs = arrayToMeasureResults(curr);
-  auto count = std::min(prevMrs.size(), currMrs.size());
+  auto prevStorage = arrayToMeasureStorage(prev);
+  auto currStorage = arrayToMeasureStorage(curr);
+  auto count = std::min(prevStorage.size(), currStorage.size());
   for (std::size_t i = 0; i < count; i++) {
-    std::vector<cudaq::measure_result> pair = {prevMrs[i], currMrs[i]};
-    nvqir::getCircuitSimulatorInternal()->detector(pair, measChronoCounter);
+    cudaq::measure_result pair[2] = {prevStorage[i], currStorage[i]};
+    auto mv = cudaq::make_measure_vector(pair, 2);
+    nvqir::getCircuitSimulatorInternal()->detector(mv);
   }
 }
 

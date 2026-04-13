@@ -6,77 +6,59 @@
 // the terms of the Apache License 2.0 which accompanies this distribution.   //
 // ========================================================================== //
 
-// RUN: cudaq-opt --lower-qec-to-qir %s | FileCheck %s
+// RUN: cudaq-opt --convert-to-qir-api %s | FileCheck %s
 
-// Verify that qec.detector and qec.logical_observable lower to runtime calls
-// that pass Result* handles through (post-QIR conversion input).
+// Verify that qec.detector and qec.logical_observable are lowered to QEC
+// runtime calls during QIR conversion (no separate pass needed).
 
-// --- Test 1: Basic detector with individual Result* operands ----------------
-// After QIR conversion, mz returns Result* and QEC ops receive those handles.
+// --- Test 1: Detector with individual !quake.measure operands ---------------
 
-func.func private @__quantum__qis__mz(!cc.ptr<!llvm.struct<"Qubit", opaque>>) -> !cc.ptr<!llvm.struct<"Result", opaque>>
-
-func.func @basic_detector() attributes {"cudaq-kernel"} {
-  %q0 = cc.undef !cc.ptr<!llvm.struct<"Qubit", opaque>>
-  %q1 = cc.undef !cc.ptr<!llvm.struct<"Qubit", opaque>>
-  %r0 = func.call @__quantum__qis__mz(%q0) : (!cc.ptr<!llvm.struct<"Qubit", opaque>>) -> !cc.ptr<!llvm.struct<"Result", opaque>>
-  %r1 = func.call @__quantum__qis__mz(%q1) : (!cc.ptr<!llvm.struct<"Qubit", opaque>>) -> !cc.ptr<!llvm.struct<"Result", opaque>>
-  qec.detector(%r0, %r1) : (!cc.ptr<!llvm.struct<"Result", opaque>>, !cc.ptr<!llvm.struct<"Result", opaque>>)
-  qec.logical_observable(%r0) : (!cc.ptr<!llvm.struct<"Result", opaque>>)
+func.func @basic_detector(%r0 : !quake.measure, %r1 : !quake.measure) attributes {"cudaq-kernel"} {
+  qec.detector(%r0, %r1) : (!quake.measure, !quake.measure)
+  qec.logical_observable(%r0) : (!quake.measure)
   return
 }
 
-// CHECK-LABEL: func.func @basic_detector()
-// Detector: pack 2 Result* into stack array, call _from_results with count=2
-// CHECK-DAG: %[[C2:.*]] = arith.constant 2 : i64
+// CHECK-LABEL: func.func @basic_detector(
+// CHECK-SAME:    %[[R0:.*]]: !cc.ptr<!llvm.struct<"Result", opaque>>,
+// CHECK-SAME:    %[[R1:.*]]: !cc.ptr<!llvm.struct<"Result", opaque>>)
 // CHECK: cc.alloca
 // CHECK: cc.store
 // CHECK: cc.store
 // CHECK: call @__quantum__qis__detector_from_results
-// Observable: pack 1 Result* into stack array, call _from_results with count=1
-// CHECK-DAG: %[[C1:.*]] = arith.constant 1 : i64
+// CHECK: cc.alloca
+// CHECK: cc.store
 // CHECK: call @__quantum__qis__logical_observable_from_results
 
 // --- Test 2: Observable with explicit index ---------------------------------
 
-func.func @observable_with_index() attributes {"cudaq-kernel"} {
-  %q0 = cc.undef !cc.ptr<!llvm.struct<"Qubit", opaque>>
-  %q1 = cc.undef !cc.ptr<!llvm.struct<"Qubit", opaque>>
-  %r0 = func.call @__quantum__qis__mz(%q0) : (!cc.ptr<!llvm.struct<"Qubit", opaque>>) -> !cc.ptr<!llvm.struct<"Result", opaque>>
-  %r1 = func.call @__quantum__qis__mz(%q1) : (!cc.ptr<!llvm.struct<"Qubit", opaque>>) -> !cc.ptr<!llvm.struct<"Result", opaque>>
-  qec.logical_observable(%r0) index 0 : (!cc.ptr<!llvm.struct<"Result", opaque>>)
-  qec.logical_observable(%r1) index 1 : (!cc.ptr<!llvm.struct<"Result", opaque>>)
+func.func @observable_with_index(%r0 : !quake.measure, %r1 : !quake.measure) attributes {"cudaq-kernel"} {
+  qec.logical_observable(%r0) index 0 : (!quake.measure)
+  qec.logical_observable(%r1) index 1 : (!quake.measure)
   return
 }
 
-// CHECK-LABEL: func.func @observable_with_index()
-// First observable: obsIdx = 0
-// CHECK: arith.constant 0 : i64
+// CHECK-LABEL: func.func @observable_with_index(
 // CHECK: call @__quantum__qis__logical_observable_from_results
-// Second observable: obsIdx = 1
-// CHECK: arith.constant 1 : i64
 // CHECK: call @__quantum__qis__logical_observable_from_results
 
-// --- Test 3: Detector with Array* operand (from measurements collection) ----
+// --- Test 3: Detector with !quake.measurements (Array*) operand -------------
 
-func.func @detector_with_array() attributes {"cudaq-kernel"} {
-  %arr = cc.undef !cc.ptr<!llvm.struct<"Array", opaque>>
-  qec.detector(%arr) : (!cc.ptr<!llvm.struct<"Array", opaque>>)
+func.func @detector_with_array(%ms : !quake.measurements<?>) attributes {"cudaq-kernel"} {
+  qec.detector(%ms) : (!quake.measurements<?>)
   return
 }
 
-// CHECK-LABEL: func.func @detector_with_array()
-// Array* operand → direct call to _from_array
-// CHECK: call @__quantum__qis__detector_from_array
+// CHECK-LABEL: func.func @detector_with_array(
+// CHECK-SAME:    %[[ARR:.*]]: !cc.ptr<!llvm.struct<"Array", opaque>>)
+// CHECK: call @__quantum__qis__detector_from_array(%[[ARR]])
 
-// --- Test 4: detectors_vectorized with Array* operands ----------------------
+// --- Test 4: detectors_vectorized with !quake.measurements operands ---------
 
-func.func @vectorized_detectors() attributes {"cudaq-kernel"} {
-  %prev = cc.undef !cc.ptr<!llvm.struct<"Array", opaque>>
-  %curr = cc.undef !cc.ptr<!llvm.struct<"Array", opaque>>
-  qec.detectors_vectorized(%prev, %curr) : (!cc.ptr<!llvm.struct<"Array", opaque>>, !cc.ptr<!llvm.struct<"Array", opaque>>)
+func.func @vectorized_detectors(%prev : !quake.measurements<?>, %curr : !quake.measurements<?>) attributes {"cudaq-kernel"} {
+  qec.detectors_vectorized(%prev, %curr) : (!quake.measurements<?>, !quake.measurements<?>)
   return
 }
 
-// CHECK-LABEL: func.func @vectorized_detectors()
+// CHECK-LABEL: func.func @vectorized_detectors(
 // CHECK: call @__quantum__qis__detectors_vectorized_from_arrays

@@ -648,22 +648,17 @@ public:
     return result;
   }
 
-  void detector(const std::vector<cudaq::measure_result> &results) override {
+  void detector(const cudaq::measure_vector &results) override {
     std::vector<uint32_t> targets;
     std::vector<std::size_t> measIndices;
     for (const auto &r : results) {
       auto uid = r.get_unique_id();
-      // INT64_MAX is the sentinel for "unassigned" unique_id (e.g.,
-      // default-constructed measure_result). Computing num_measurements -
-      // INT64_MAX would underflow to a garbage lookback. Skip this entry
-      // with a diagnostic rather than producing a corrupt DETECTOR instruction.
       if (uid == std::numeric_limits<std::int64_t>::max()) {
         CUDAQ_INFO("detector: skipping measure_result with unassigned "
                    "unique_id (sentinel INT64_MAX)");
         continue;
       }
-      uint32_t lookback =
-          static_cast<uint32_t>(num_measurements - uid);
+      uint32_t lookback = static_cast<uint32_t>(num_measurements - uid);
       targets.push_back(lookback | stim::TARGET_RECORD_BIT);
       measIndices.push_back(static_cast<std::size_t>(uid));
     }
@@ -673,21 +668,19 @@ public:
       detectorRows.push_back(std::move(measIndices));
   }
 
-  void detectors_vectorized(
-      const std::vector<cudaq::measure_result> &prev,
-      const std::vector<cudaq::measure_result> &curr) override {
+  void detectors_vectorized(const cudaq::measure_vector &prev,
+                            const cudaq::measure_vector &curr) override {
     if (prev.size() != curr.size())
       throw std::runtime_error(
           "detectors_vectorized: prev and curr must have equal length");
     for (std::size_t i = 0; i < prev.size(); i++) {
-      std::vector<cudaq::measure_result> pair;
-      pair.push_back(prev[i]);
-      pair.push_back(curr[i]);
-      detector(pair);
+      cudaq::measure_result pair[2] = {prev[i], curr[i]};
+      auto mv = cudaq::make_measure_vector(pair, 2);
+      detector(mv);
     }
   }
 
-  void logical_observable(const std::vector<cudaq::measure_result> &results,
+  void logical_observable(const cudaq::measure_vector &results,
                           std::size_t observable_index = 0) override {
     std::vector<uint32_t> targets;
     std::vector<std::size_t> measIndices;
@@ -695,53 +688,7 @@ public:
       auto uid = r.get_unique_id();
       if (uid == std::numeric_limits<std::int64_t>::max())
         continue;
-      uint32_t lookback =
-          static_cast<uint32_t>(num_measurements - uid);
-      targets.push_back(lookback | stim::TARGET_RECORD_BIT);
-      measIndices.push_back(static_cast<std::size_t>(uid));
-    }
-    if (!targets.empty())
-      recordedCircuit.safe_append_ua("OBSERVABLE_INCLUDE", targets,
-                                     static_cast<double>(observable_index));
-    if (!measIndices.empty())
-      observableRows[observable_index] = std::move(measIndices);
-  }
-
-  // Compiled-mode overloads: use compiler-provided totalMeasurements instead
-  // of the runtime num_measurements counter (which is zero during deferred-
-  // measurement sampling in cudaq::sample). The compiler resolves each
-  // !quake.measure SSA value to a chronological index at compile time and
-  // passes it via the unique_id field.
-  void detector(const std::vector<cudaq::measure_result> &results,
-                std::size_t totalMeasurements) override {
-    std::vector<uint32_t> targets;
-    std::vector<std::size_t> measIndices;
-    for (const auto &r : results) {
-      auto uid = r.get_unique_id();
-      if (uid == std::numeric_limits<std::int64_t>::max())
-        continue;
-      uint32_t lookback =
-          static_cast<uint32_t>(totalMeasurements - uid);
-      targets.push_back(lookback | stim::TARGET_RECORD_BIT);
-      measIndices.push_back(static_cast<std::size_t>(uid));
-    }
-    if (!targets.empty())
-      recordedCircuit.safe_append_u("DETECTOR", targets);
-    if (!measIndices.empty())
-      detectorRows.push_back(std::move(measIndices));
-  }
-
-  void logical_observable(const std::vector<cudaq::measure_result> &results,
-                          std::size_t observable_index,
-                          std::size_t totalMeasurements) override {
-    std::vector<uint32_t> targets;
-    std::vector<std::size_t> measIndices;
-    for (const auto &r : results) {
-      auto uid = r.get_unique_id();
-      if (uid == std::numeric_limits<std::int64_t>::max())
-        continue;
-      uint32_t lookback =
-          static_cast<uint32_t>(totalMeasurements - uid);
+      uint32_t lookback = static_cast<uint32_t>(num_measurements - uid);
       targets.push_back(lookback | stim::TARGET_RECORD_BIT);
       measIndices.push_back(static_cast<std::size_t>(uid));
     }

@@ -2268,17 +2268,78 @@ static void commonQuakeHandlingPatterns(RewritePatternSet &patterns,
                                                                 ctx);
 }
 
-// QEC ops survive QIR conversion with updated operand types.
-// These patterns recreate the ops with type-converted operands so the
-// conversion framework doesn't need materialization callbacks.
+// QEC lowering patterns. These convert qec.detector / qec.logical_observable /
+// qec.detectors_vectorized directly to runtime function calls during QIR
+// conversion. The adaptor provides already-converted operands (Result* or
+// Array*). The QPU resolves measurement identity at runtime.
+
+static bool isArrayPtrType(Type ty) {
+  if (auto ptrTy = dyn_cast<cudaq::cc::PointerType>(ty))
+    if (auto structTy = dyn_cast<LLVM::LLVMStructType>(ptrTy.getElementType()))
+      return structTy.getName() == "Array";
+  return false;
+}
+
+static func::FuncOp ensureRuntimeFuncDecl(ModuleOp module,
+                                          ConversionPatternRewriter &rewriter,
+                                          StringRef funcName,
+                                          ArrayRef<Type> argTypes) {
+  if (auto existing = module.lookupSymbol<func::FuncOp>(funcName))
+    return existing;
+  auto funcTy =
+      FunctionType::get(rewriter.getContext(), argTypes, /*results=*/{});
+  OpBuilder::InsertionGuard guard(rewriter);
+  rewriter.setInsertionPointToStart(module.getBody());
+  auto fn = rewriter.create<func::FuncOp>(module.getLoc(), funcName, funcTy);
+  fn.setPrivate();
+  return fn;
+}
 
 struct DetectorOpConversion : OpConversionPattern<qec::DetectorOp> {
   using OpConversionPattern::OpConversionPattern;
   LogicalResult
   matchAndRewrite(qec::DetectorOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    rewriter.replaceOpWithNewOp<qec::DetectorOp>(op,
-                                                  adaptor.getMeasurements());
+    auto loc = op.getLoc();
+    auto module = op->getParentOfType<ModuleOp>();
+    auto operands = adaptor.getMeasurements();
+
+    if (operands.empty()) {
+      rewriter.eraseOp(op);
+      return success();
+    }
+
+    if (operands.size() == 1 && isArrayPtrType(operands[0].getType())) {
+      auto arrTy = operands[0].getType();
+      ensureRuntimeFuncDecl(module, rewriter, cudaq::opt::QIRDetectorFromArray,
+                            {arrTy});
+      rewriter.create<func::CallOp>(loc, TypeRange{},
+                                    cudaq::opt::QIRDetectorFromArray,
+                                    ValueRange{operands[0]});
+      rewriter.eraseOp(op);
+      return success();
+    }
+
+    auto i64Ty = rewriter.getI64Type();
+    auto count = static_cast<std::int64_t>(operands.size());
+    auto countVal = rewriter.create<arith::ConstantIntOp>(loc, count, 64);
+    auto resultPtrTy = operands[0].getType();
+    auto ptrToPtrTy = cudaq::cc::PointerType::get(resultPtrTy);
+    Value arr =
+        rewriter.create<cudaq::cc::AllocaOp>(loc, resultPtrTy, countVal);
+    for (auto [i, meas] : llvm::enumerate(operands)) {
+      auto idx = static_cast<std::int32_t>(i);
+      auto ptr = rewriter.create<cudaq::cc::ComputePtrOp>(
+          loc, ptrToPtrTy, arr, ArrayRef<cudaq::cc::ComputePtrArg>{idx});
+      rewriter.create<cudaq::cc::StoreOp>(loc, meas, ptr);
+    }
+    Value castPtr = rewriter.create<cudaq::cc::CastOp>(loc, ptrToPtrTy, arr);
+    ensureRuntimeFuncDecl(module, rewriter, cudaq::opt::QIRDetectorFromResults,
+                          {ptrToPtrTy, i64Ty});
+    rewriter.create<func::CallOp>(loc, TypeRange{},
+                                  cudaq::opt::QIRDetectorFromResults,
+                                  ValueRange{castPtr, countVal});
+    rewriter.eraseOp(op);
     return success();
   }
 };
@@ -2289,8 +2350,50 @@ struct LogicalObservableOpConversion
   LogicalResult
   matchAndRewrite(qec::LogicalObservableOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    rewriter.replaceOpWithNewOp<qec::LogicalObservableOp>(
-        op, adaptor.getMeasurements(), op.getObservableIndexAttr());
+    auto loc = op.getLoc();
+    auto module = op->getParentOfType<ModuleOp>();
+    auto operands = adaptor.getMeasurements();
+    auto i64Ty = rewriter.getI64Type();
+    auto obsIdxVal =
+        rewriter.create<arith::ConstantIntOp>(loc, op.getObservableIndex(), 64);
+
+    if (operands.empty()) {
+      rewriter.eraseOp(op);
+      return success();
+    }
+
+    if (operands.size() == 1 && isArrayPtrType(operands[0].getType())) {
+      auto arrTy = operands[0].getType();
+      ensureRuntimeFuncDecl(module, rewriter,
+                            cudaq::opt::QIRLogicalObservableFromArray,
+                            {arrTy, i64Ty});
+      rewriter.create<func::CallOp>(loc, TypeRange{},
+                                    cudaq::opt::QIRLogicalObservableFromArray,
+                                    ValueRange{operands[0], obsIdxVal});
+      rewriter.eraseOp(op);
+      return success();
+    }
+
+    auto count = static_cast<std::int64_t>(operands.size());
+    auto countVal = rewriter.create<arith::ConstantIntOp>(loc, count, 64);
+    auto resultPtrTy = operands[0].getType();
+    auto ptrToPtrTy = cudaq::cc::PointerType::get(resultPtrTy);
+    Value arr =
+        rewriter.create<cudaq::cc::AllocaOp>(loc, resultPtrTy, countVal);
+    for (auto [i, meas] : llvm::enumerate(operands)) {
+      auto idx = static_cast<std::int32_t>(i);
+      auto ptr = rewriter.create<cudaq::cc::ComputePtrOp>(
+          loc, ptrToPtrTy, arr, ArrayRef<cudaq::cc::ComputePtrArg>{idx});
+      rewriter.create<cudaq::cc::StoreOp>(loc, meas, ptr);
+    }
+    Value castPtr = rewriter.create<cudaq::cc::CastOp>(loc, ptrToPtrTy, arr);
+    ensureRuntimeFuncDecl(module, rewriter,
+                          cudaq::opt::QIRLogicalObservableFromResults,
+                          {ptrToPtrTy, i64Ty, i64Ty});
+    rewriter.create<func::CallOp>(loc, TypeRange{},
+                                  cudaq::opt::QIRLogicalObservableFromResults,
+                                  ValueRange{castPtr, countVal, obsIdxVal});
+    rewriter.eraseOp(op);
     return success();
   }
 };
@@ -2301,8 +2404,18 @@ struct DetectorsVectorizedOpConversion
   LogicalResult
   matchAndRewrite(qec::DetectorsVectorizedOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    rewriter.replaceOpWithNewOp<qec::DetectorsVectorizedOp>(
-        op, adaptor.getPrev(), adaptor.getCurr());
+    auto loc = op.getLoc();
+    auto module = op->getParentOfType<ModuleOp>();
+    auto prev = adaptor.getPrev();
+    auto curr = adaptor.getCurr();
+    SmallVector<Type> argTypes = {prev.getType(), curr.getType()};
+    ensureRuntimeFuncDecl(module, rewriter,
+                          cudaq::opt::QIRDetectorsVectorizedFromArrays,
+                          argTypes);
+    rewriter.create<func::CallOp>(loc, TypeRange{},
+                                  cudaq::opt::QIRDetectorsVectorizedFromArrays,
+                                  ValueRange{prev, curr});
+    rewriter.eraseOp(op);
     return success();
   }
 };
@@ -2525,16 +2638,8 @@ struct QuakeToQIRAPIPass
                            LLVM::LLVMDialect>();
     target.addIllegalDialect<quake::QuakeDialect,
                              cudaq::codegen::CodeGenDialect>();
-    // QEC ops are legal once their operands have been converted from
-    // quake types to QIR types (Result* / Array*).
-    target.addDynamicallyLegalOp<qec::DetectorOp, qec::LogicalObservableOp,
-                                 qec::DetectorsVectorizedOp>(
-        [&](Operation *op) {
-          for (auto opnd : op->getOperands())
-            if (hasQuakeType(opnd.getType()))
-              return false;
-          return true;
-        });
+    target.addIllegalOp<qec::DetectorOp, qec::LogicalObservableOp,
+                        qec::DetectorsVectorizedOp>();
     target.addLegalOp<cudaq::codegen::MaterializeConstantArrayOp>();
     target.addDynamicallyLegalOp<func::FuncOp>([&](func::FuncOp fn) {
       return !hasQuakeType(fn.getFunctionType()) &&

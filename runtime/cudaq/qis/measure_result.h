@@ -101,9 +101,7 @@ public:
   measure_vector &operator=(measure_vector &&) = delete;
 
   std::size_t size() const { return size_; }
-  const measure_result &operator[](std::size_t idx) const {
-    return data_[idx];
-  }
+  const measure_result &operator[](std::size_t idx) const { return data_[idx]; }
 
   const measure_result *begin() const { return data_; }
   const measure_result *end() const { return data_ + size_; }

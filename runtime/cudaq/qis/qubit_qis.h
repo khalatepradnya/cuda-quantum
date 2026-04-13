@@ -574,7 +574,6 @@ void __quantum__qis__logical_observable(cudaq::measure_result *results,
                                         std::size_t observable_index);
 }
 
-
 /// Declare a detector over one or more measurement results.
 /// A detector is a parity constraint: under noise-free execution the
 /// XOR of the referenced measurements is deterministic.
@@ -588,8 +587,7 @@ void detector(MeasArgs &...ms) {
 
 /// Declare a detector from a measurement collection.
 inline void detector(const measure_vector &ms) {
-  __quantum__qis__detector(const_cast<measure_result *>(ms.begin()),
-                           ms.size());
+  __quantum__qis__detector(const_cast<measure_result *>(ms.begin()), ms.size());
 }
 
 /// Backward-compatible overload; prefer const measure_vector& above.
@@ -637,8 +635,8 @@ void logical_observable(MeasArgs &...ms) {
 ///   Codes with k logical qubits should declare observables 0..k-1.
 inline void logical_observable(const measure_vector &ms,
                                std::size_t observable_index = 0) {
-  __quantum__qis__logical_observable(
-      const_cast<measure_result *>(ms.begin()), ms.size(), observable_index);
+  __quantum__qis__logical_observable(const_cast<measure_result *>(ms.begin()),
+                                     ms.size(), observable_index);
 }
 
 /// Backward-compatible overload; prefer const measure_vector& above.

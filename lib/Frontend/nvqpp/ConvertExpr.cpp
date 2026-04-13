@@ -2399,8 +2399,7 @@ bool QuakeBridgeVisitor::VisitCallExpr(clang::CallExpr *x) {
       // logical qubits can declare distinct observables in compiled mode.
       SmallVector<Value> measArgs(args);
       std::int64_t obsIdx = 0;
-      if (!measArgs.empty() &&
-          measArgs.back().getType().isIntOrIndex()) {
+      if (!measArgs.empty() && measArgs.back().getType().isIntOrIndex()) {
         if (auto cst = measArgs.back().getDefiningOp<arith::ConstantIntOp>())
           obsIdx = cst.value();
         measArgs.pop_back();

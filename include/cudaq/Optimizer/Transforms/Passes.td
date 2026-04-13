@@ -431,27 +431,6 @@ def DistributedDeviceCall : Pass<"distributed-device-call", "mlir::ModuleOp"> {
   ];
 }
 
-def LowerQECToQIR : Pass<"lower-qec-to-qir"> {
-  let summary = "Lower QEC operations to QIR runtime calls.";
-  let description = [{
-    Lowers qec.detector, qec.logical_observable, and
-    qec.detectors_vectorized operations to runtime function calls.
-
-    This pass runs AFTER QIR conversion, so operands are already
-    %Result* (from converted mz calls) or %Array* (from converted
-    multi-qubit measurement collections). The pass packs Result*
-    operands into stack-allocated arrays and calls runtime functions
-    that accept Result** or Array*. The QPU resolves measurement
-    identity at runtime from the Result* handles, eliminating the
-    need for compiler-side measurement index resolution.
-  }];
-  let dependentDialects = [
-    "cudaq::cc::CCDialect",
-    "mlir::arith::ArithDialect",
-    "mlir::func::FuncDialect"
-  ];
-}
-
 def EraseNoise : Pass<"erase-noise"> {
   let summary = "Erase the injection of noise via Kraus channels.";
   let description = [{

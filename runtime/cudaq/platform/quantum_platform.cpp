@@ -104,8 +104,7 @@ void quantum_platform::enqueueAsyncTask(const std::size_t qpu_id,
   platformQPUs[qpu_id]->enqueue(f);
 }
 
-const std::any &
-quantum_platform::queryMetadataRaw(std::size_t qpu_id) const {
+const std::any &quantum_platform::queryMetadataRaw(std::size_t qpu_id) const {
   validateQpuId(qpu_id);
   return platformQPUs[qpu_id]->queryRaw();
 }

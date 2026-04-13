@@ -107,10 +107,6 @@ void createTargetCodegenPipeline(PassManager &pm,
     pm.addNestedPass<func::FuncOp>(createCanonicalizerPass());
   }
   ::addQIRConversionPipeline(pm, options.target);
-  // QEC lowering runs AFTER QIR conversion so that detector/observable
-  // operands are already %Result* (from converted mz calls). The QPU
-  // resolves measurement identity at runtime, not the compiler.
-  pm.addPass(cudaq::opt::createLowerQECToQIR());
   // QIR conversion may introduce cc.loop, lower to cf.
   cudaq::opt::addLowerToCFG(pm);
   pm.addPass(cudaq::opt::createReturnToOutputLog());
