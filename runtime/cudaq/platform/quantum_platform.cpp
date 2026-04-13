@@ -104,6 +104,12 @@ void quantum_platform::enqueueAsyncTask(const std::size_t qpu_id,
   platformQPUs[qpu_id]->enqueue(f);
 }
 
+const std::any &
+quantum_platform::queryMetadataRaw(std::size_t qpu_id) const {
+  validateQpuId(qpu_id);
+  return platformQPUs[qpu_id]->queryRaw();
+}
+
 void quantum_platform::validateQpuId(std::size_t qpuId) const {
   if (platformQPUs.empty())
     throw std::runtime_error("No QPUs are available for this target.");

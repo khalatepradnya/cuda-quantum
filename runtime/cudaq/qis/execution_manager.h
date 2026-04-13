@@ -14,6 +14,7 @@
 #include "common/SampleResult.h"
 #include "cudaq/host_config.h"
 #include "cudaq/operators.h"
+#include <any>
 #include <deque>
 #include <string_view>
 #include <vector>
@@ -82,6 +83,10 @@ public:
 
   /// Clean up the execution manager after an execution.
   virtual void endExecution() {}
+
+  /// Return backend-specific metadata from the underlying simulator.
+  /// Default returns empty; overridden by managers that wrap a simulator.
+  virtual std::any getSimulatorMetadata() const { return {}; }
 
   /// @brief Initialize the state of the given qudits to the provided
   /// state vector.

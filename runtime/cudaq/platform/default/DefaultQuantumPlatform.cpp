@@ -59,7 +59,9 @@ public:
   }
 
   void endExecution() override {
-    cudaq::getExecutionContext()->executionManager->endExecution();
+    auto *em = cudaq::getExecutionContext()->executionManager;
+    em->endExecution();
+    setMetadata(em->getSimulatorMetadata());
   }
 
   void

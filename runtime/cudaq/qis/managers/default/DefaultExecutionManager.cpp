@@ -174,6 +174,10 @@ protected:
     simulator()->endExecution();
   }
 
+  std::any getSimulatorMetadata() const override {
+    return nvqir::getCircuitSimulatorInternal()->getMetadata();
+  }
+
   void executeInstruction(const Instruction &instruction) override {
     flushRequestedAllocations();
 

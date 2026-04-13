@@ -6,10 +6,12 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
+#include "StimQECData.h"
 #include "common/FmtCore.h"
 #include "cudaq/qis/measure_result.h"
 #include "nvqir/CircuitSimulator.h"
 #include "stim.h"
+#include <any>
 #include <limits>
 #include <numeric>
 
@@ -75,6 +77,11 @@ protected:
   /// @brief Observable matrix rows. Row i = set of measurement indices for
   /// logical observable i.
   std::map<std::size_t, std::vector<std::size_t>> observableRows;
+
+  /// Cached metadata snapshot, populated during deallocateStateImpl()
+  /// before detectorRows/observableRows are cleared. getMetadata()
+  /// returns this cache since the live data is wiped during cleanup.
+  std::any cachedMetadata;
 
   std::optional<StimNoiseType>
   isValidStimNoiseChannel(const kraus_channel &channel) const {
@@ -272,8 +279,8 @@ protected:
     }
   }
 
-  /// Flatten detectorRows/observableRows into the execution context's
-  /// detector_matrix and observable_matrix fields.
+  /// @deprecated Prefer getMetadata() + query<StimQECData>(). This method
+  /// writes to ExecutionContext fields which are being phased out.
   void flushDetectorMatrixToContext() {
     auto *ctx = getExecutionContext();
     if (!ctx)
@@ -309,6 +316,18 @@ protected:
   /// @brief Reset the qubit state.
   void deallocateStateImpl() override {
     flushDetectorMatrixToContext();
+
+    // Snapshot QEC data before clearing, so getMetadata() can return it
+    // after deallocation completes.
+    if (!detectorRows.empty() || !observableRows.empty()) {
+      cudaq::StimQECData data;
+      data.detectorRows = detectorRows;
+      data.observableRows = observableRows;
+      data.totalMeasurements = num_measurements;
+      cachedMetadata = std::move(data);
+    } else {
+      cachedMetadata.reset();
+    }
 
     tableau.reset();
     // Update the randomEngine so that future invocations will use the updated
@@ -788,6 +807,8 @@ public:
   /// flushDetectorMatrixToContext), which are correct regardless of the
   /// temporal ordering in recordedCircuit.
   const stim::Circuit &getRecordedCircuit() const { return recordedCircuit; }
+
+  std::any getMetadata() const override { return cachedMetadata; }
 
   bool isStateVectorSimulator() const override { return false; }
 

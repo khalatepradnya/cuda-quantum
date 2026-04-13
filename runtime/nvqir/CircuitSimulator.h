@@ -25,6 +25,7 @@
 #include <queue>
 #include <sstream>
 #include <stdexcept>
+#include <any>
 #include <string>
 #include <utility>
 
@@ -394,6 +395,11 @@ public:
   virtual cudaq::ExecutionResult
   sample(const std::vector<std::size_t> &qubitIdxs, const int shots,
          bool includeSequentialData = true) = 0;
+
+  /// @brief Return backend-specific metadata from the most recent execution.
+  /// Backends override this to expose post-execution data (QEC matrices,
+  /// timing info, etc.) without adding fields to ExecutionContext.
+  virtual std::any getMetadata() const { return {}; }
 
   /// @brief Declare a detector over one or more measurement results.
   /// Default implementation is a no-op; backends that support QEC

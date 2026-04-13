@@ -18,6 +18,7 @@
 #include "cudaq/remote_capabilities.h"
 #include "cudaq/runtime/logger/logger.h"
 #include "cudaq/utils/cudaq_utils.h"
+#include <any>
 
 namespace mlir {
 class ModuleOp;
@@ -48,6 +49,11 @@ protected:
   std::size_t numQubits = 30;
   std::optional<std::vector<std::pair<std::size_t, std::size_t>>> connectivity;
   std::unique_ptr<QuantumExecutionQueue> execution_queue;
+
+  /// Type-erased metadata from the most recent execution. Backends populate
+  /// this via setMetadata() during endExecution(); host code retrieves via
+  /// query<T>(). Replaces per-feature fields on ExecutionContext.
+  std::any metadata;
 
   /// @brief Noise model specified for QPU execution.
   const noise_model *noiseModel = nullptr;
@@ -206,6 +212,22 @@ public:
   /// @brief Notify the QPU that a new random seed value is set.
   /// By default do nothing, let subclasses override.
   virtual void onRandomSeedSet(std::size_t seed) {}
+
+  /// Store backend-specific metadata (overwrites any previous value).
+  void setMetadata(std::any data) { metadata = std::move(data); }
+
+  /// Query backend-specific metadata by type. Returns nullptr if the
+  /// stored metadata is empty or does not match type T.
+  template <typename T>
+  const T *query() const {
+    return std::any_cast<T>(&metadata);
+  }
+
+  /// Non-template metadata access for platform bridging.
+  const std::any &queryRaw() const { return metadata; }
+
+  /// Clear metadata.
+  void clearMetadata() { metadata.reset(); }
 };
 
 struct ModuleLauncher : public registry::RegisteredType<ModuleLauncher> {
