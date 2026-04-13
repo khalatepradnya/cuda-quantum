@@ -67,6 +67,14 @@ protected:
   /// Records all gates, measurements, noise, detectors, and observables.
   stim::Circuit recordedCircuit;
 
+  /// @brief Detector matrix rows, built from detector() calls. Each row is a
+  /// set of measurement indices that participate in that detector.
+  std::vector<std::vector<std::size_t>> detectorRows;
+
+  /// @brief Observable matrix rows. Row i = set of measurement indices for
+  /// logical observable i.
+  std::map<std::size_t, std::vector<std::size_t>> observableRows;
+
   std::optional<StimNoiseType>
   isValidStimNoiseChannel(const kraus_channel &channel) const {
 
@@ -263,8 +271,44 @@ protected:
     }
   }
 
+  /// Flatten detectorRows/observableRows into the execution context's
+  /// detector_matrix and observable_matrix fields.
+  void flushDetectorMatrixToContext() {
+    auto *ctx = getExecutionContext();
+    if (!ctx)
+      return;
+
+    std::size_t numMeas = num_measurements;
+    if (numMeas == 0)
+      return;
+
+    if (!detectorRows.empty()) {
+      std::size_t numDet = detectorRows.size();
+      std::vector<uint8_t> D(numDet * numMeas, 0);
+      for (std::size_t d = 0; d < numDet; d++)
+        for (auto mIdx : detectorRows[d])
+          if (mIdx < numMeas)
+            D[d * numMeas + mIdx] = 1;
+      ctx->detector_matrix = std::move(D);
+      ctx->detector_dimensions = {numDet, numMeas};
+    }
+
+    if (!observableRows.empty()) {
+      std::size_t maxObs = observableRows.rbegin()->first + 1;
+      std::vector<uint8_t> O(maxObs * numMeas, 0);
+      for (auto &[obsIdx, measIds] : observableRows)
+        for (auto mIdx : measIds)
+          if (mIdx < numMeas)
+            O[obsIdx * numMeas + mIdx] = 1;
+      ctx->observable_matrix = std::move(O);
+      ctx->observable_dimensions = {maxObs, numMeas};
+    }
+  }
+
   /// @brief Reset the qubit state.
   void deallocateStateImpl() override {
+    flushDetectorMatrixToContext();
+
     tableau.reset();
     // Update the randomEngine so that future invocations will use the updated
     // RNG state.
@@ -275,6 +319,8 @@ protected:
     msm_err_count = 0;
     msm_id_counter = 0;
     is_msm_mode = false;
+    detectorRows.clear();
+    observableRows.clear();
     // Note: recordedCircuit is intentionally NOT cleared here so it
     // can be read after kernel execution for DEM generation.
   }
@@ -620,11 +666,15 @@ public:
 
   void detector(const std::vector<cudaq::measure_result> &results) override {
     std::vector<uint32_t> targets;
+    std::vector<std::size_t> measIndices;
     for (const auto &r : results) {
-      uint32_t lookback = static_cast<uint32_t>(num_measurements - r.unique_id);
+      uint32_t lookback =
+          static_cast<uint32_t>(num_measurements - r.get_unique_id());
       targets.push_back(lookback | stim::TARGET_RECORD_BIT);
+      measIndices.push_back(static_cast<std::size_t>(r.get_unique_id()));
     }
     recordedCircuit.safe_append_u("DETECTOR", targets);
+    detectorRows.push_back(std::move(measIndices));
   }
 
   void detectors_vectorized(
@@ -644,41 +694,54 @@ public:
   void logical_observable(const std::vector<cudaq::measure_result> &results,
                           std::size_t observable_index = 0) override {
     std::vector<uint32_t> targets;
+    std::vector<std::size_t> measIndices;
     for (const auto &r : results) {
-      uint32_t lookback = static_cast<uint32_t>(num_measurements - r.unique_id);
+      uint32_t lookback =
+          static_cast<uint32_t>(num_measurements - r.get_unique_id());
       targets.push_back(lookback | stim::TARGET_RECORD_BIT);
+      measIndices.push_back(static_cast<std::size_t>(r.get_unique_id()));
     }
     recordedCircuit.safe_append_ua("OBSERVABLE_INCLUDE", targets,
                                    static_cast<double>(observable_index));
+    observableRows[observable_index] = std::move(measIndices);
   }
 
   void detector(const std::vector<cudaq::measure_result> &results,
                 std::size_t totalMeasurements) override {
     std::vector<uint32_t> targets;
+    std::vector<std::size_t> measIndices;
     for (const auto &r : results) {
       uint32_t lookback =
-          static_cast<uint32_t>(totalMeasurements - r.unique_id);
+          static_cast<uint32_t>(totalMeasurements - r.get_unique_id());
       targets.push_back(lookback | stim::TARGET_RECORD_BIT);
+      measIndices.push_back(static_cast<std::size_t>(r.get_unique_id()));
     }
     recordedCircuit.safe_append_u("DETECTOR", targets);
+    detectorRows.push_back(std::move(measIndices));
   }
 
   void logical_observable(const std::vector<cudaq::measure_result> &results,
                           std::size_t observable_index,
                           std::size_t totalMeasurements) override {
     std::vector<uint32_t> targets;
+    std::vector<std::size_t> measIndices;
     for (const auto &r : results) {
       uint32_t lookback =
-          static_cast<uint32_t>(totalMeasurements - r.unique_id);
+          static_cast<uint32_t>(totalMeasurements - r.get_unique_id());
       targets.push_back(lookback | stim::TARGET_RECORD_BIT);
+      measIndices.push_back(static_cast<std::size_t>(r.get_unique_id()));
     }
     recordedCircuit.safe_append_ua("OBSERVABLE_INCLUDE", targets,
                                    static_cast<double>(observable_index));
+    observableRows[observable_index] = std::move(measIndices);
   }
 
-  /// @brief Get the recorded Stim circuit (for DEM generation).
+  /// @brief Get the recorded Stim circuit. Debug/test only -- in compiled mode
+  /// the ordering may be wrong (DETECTOR before M). Production DEM generation
+  /// should use the D @ S path via detector_matrix on ExecutionContext.
   const stim::Circuit &getRecordedCircuit() const { return recordedCircuit; }
 
+  /// Debug/test only. See getRecordedCircuit() note above.
   std::string getCircuitRepr() const override {
     std::stringstream ss;
     ss << recordedCircuit;

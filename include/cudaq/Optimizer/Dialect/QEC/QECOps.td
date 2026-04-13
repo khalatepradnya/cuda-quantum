@@ -15,6 +15,10 @@ include "mlir/IR/OpBase.td"
 class QECOp<string mnemonic, list<Trait> traits = []>
     : Op<QECDialect, mnemonic, traits>;
 
+// TODO: constrain operand types from AnyType to !quake.measure /
+// cc.stdvec<!quake.measure> once the prototype stabilizes. AnyType is
+// acceptable during prototyping but weakens IR verification. See #gap-9.
+
 def QEC_DetectorOp : QECOp<"detector"> {
   let summary = "Declare a detector over measurement results.";
   let description = [{

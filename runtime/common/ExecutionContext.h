@@ -155,6 +155,24 @@ public:
   /// https://arxiv.org/pdf/2407.13826.
   std::optional<std::pair<std::size_t, std::size_t>> msm_dimensions;
 
+  /// @brief Detector matrix D (d x m), stored as a flat vector in row-major
+  /// order: D[detector_idx * num_measurements + measurement_idx].
+  /// Populated from cudaq::detector() declarations. Row count is
+  /// detector_dimensions.first, column count is detector_dimensions.second.
+  std::optional<std::vector<uint8_t>> detector_matrix;
+
+  /// @brief Dimensions of the detector matrix: (num_detectors,
+  /// num_measurements).
+  std::optional<std::pair<std::size_t, std::size_t>> detector_dimensions;
+
+  /// @brief Observable matrix O (num_observables x num_measurements).
+  /// Row i has 1 at column j if logical observable i includes measurement j.
+  std::optional<std::vector<uint8_t>> observable_matrix;
+
+  /// @brief Dimensions of the observable matrix: (num_observables,
+  /// num_measurements).
+  std::optional<std::pair<std::size_t, std::size_t>> observable_dimensions;
+
   bool allowJitEngineCaching = false;
 
   bool useParametricJit = false;

@@ -10,6 +10,11 @@
 
 #include <cudaq.h>
 #include <cstdio>
+#include <string>
+
+extern "C" {
+const char *__nvqir__getCircuitRepr();
+}
 
 auto rep_code_kernel = []() __qpu__ {
   cudaq::qvector q(3);
@@ -31,7 +36,8 @@ int main() {
       cudaq::sample({.shots = 10, .explicit_measurements = true},
                     rep_code_kernel);
 
-  auto circuit = cudaq::getCircuitRepr();
+  const char *repr = __nvqir__getCircuitRepr();
+  std::string circuit = repr ? repr : "";
   printf("%s", circuit.c_str());
 
   bool has_detector = circuit.find("DETECTOR") != std::string::npos;

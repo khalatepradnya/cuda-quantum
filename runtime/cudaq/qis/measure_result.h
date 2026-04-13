@@ -25,13 +25,16 @@ bool __nvqpp__MeasureResultBoolConversion(int);
 /// TODO: A companion `measure_vector` type will replace
 /// `std::vector<measure_result>` for multi-qubit measurements (see spec).
 class measure_result {
-public:
-  /// The intrinsic measurement value
   std::int64_t value = 0;
 
-  /// Unique integer for measure result identification.
-  /// INT64_MAX means unassigned; negative values are valid
+  /// Lookup key for backend-specific metadata. INT64_MAX means unassigned.
   std::int64_t unique_id = std::numeric_limits<std::int64_t>::max();
+
+public:
+  /// Factory for runtime construction (NVQIR and measurement functions).
+  static measure_result make(std::int64_t val, std::int64_t id) {
+    return measure_result(val, id);
+  }
 
   // No default construction (measurements must come from mz/mx/my).
   // Copy and move are allowed for cross-round detector patterns.
@@ -41,11 +44,8 @@ public:
   measure_result &operator=(const measure_result &) = default;
   measure_result &operator=(measure_result &&) = default;
 
-  explicit measure_result(int64_t val) : value(val) {}
-  explicit measure_result(int64_t val, int64_t id)
-      : value(val), unique_id(id) {}
+  std::int64_t get_unique_id() const { return unique_id; }
 
-  // Operator overloads for conversions and comparisons
 #ifdef CUDAQ_LIBRARY_MODE
   operator bool() const { return __nvqpp__MeasureResultBoolConversion(value); }
 #else
@@ -55,7 +55,7 @@ public:
   explicit operator double() const { return static_cast<double>(value); }
 
   friend bool operator==(const measure_result &m1, const measure_result &m2) {
-    return (m1.value == m2.value) && (m1.unique_id == m2.unique_id);
+    return m1.value == m2.value;
   }
   friend bool operator==(const measure_result &m, bool b) {
     return static_cast<bool>(m) == b;
@@ -65,7 +65,7 @@ public:
   }
 
   friend bool operator!=(const measure_result &m1, const measure_result &m2) {
-    return (m1.value != m2.value) || (m1.unique_id != m2.unique_id);
+    return m1.value != m2.value;
   }
   friend bool operator!=(const measure_result &m, bool b) {
     return static_cast<bool>(m) != b;
@@ -73,6 +73,11 @@ public:
   friend bool operator!=(bool b, const measure_result &m) {
     return b != static_cast<bool>(m);
   }
+
+private:
+  explicit measure_result(std::int64_t val) : value(val) {}
+  explicit measure_result(std::int64_t val, std::int64_t id)
+      : value(val), unique_id(id) {}
 };
 
 } // namespace cudaq

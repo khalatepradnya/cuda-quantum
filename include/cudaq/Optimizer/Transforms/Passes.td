@@ -457,6 +457,16 @@ def EraseNoise : Pass<"erase-noise"> {
   }];
 }
 
+def EraseQEC : Pass<"erase-qec"> {
+  let summary = "Erase QEC detector and observable declarations.";
+  let description = [{
+    Removes qec.detector, qec.logical_observable, and
+    qec.detectors_vectorized operations from the IR. These annotations are
+    only meaningful for QEC-aware backends (e.g., Stim). Hardware targets
+    and simulators without QEC support should strip them before codegen.
+  }];
+}
+
 def EraseNopCalls : Pass<"erase-nop-calls"> {
   let summary = "Erase calls to any builtin intrinsics that are NOPs.";
   let description = [{

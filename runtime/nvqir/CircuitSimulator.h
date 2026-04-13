@@ -398,6 +398,9 @@ public:
   /// @brief Get a string representation of the recorded circuit, including
   /// all gates, measurements, noise, detectors, and observables.
   /// Only meaningful for backends that record circuits (e.g., Stim).
+  /// Internal/test use only -- not exposed as a public cudaq:: API.
+  /// Production DEM generation uses the D @ S path via detector_matrix
+  /// and MSM fields on ExecutionContext.
   virtual std::string getCircuitRepr() const { return ""; }
 
   /// @brief Declare a detector over one or more measurement results.

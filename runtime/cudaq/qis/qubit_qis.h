@@ -430,14 +430,14 @@ inline std::int64_t nextMeasurementId() { return measurement_counter++; }
 /// @brief Measure an individual qubit, return as `measure_result`
 inline measure_result mz(qubit &q) {
   auto val = getExecutionManager()->measure(QuditInfo{q.n_levels(), q.id()});
-  return measure_result(val, details::nextMeasurementId());
+  return measure_result::make(val, details::nextMeasurementId());
 }
 
 /// @brief Measure an individual qubit in `x` basis, return as `measure_result`
 inline measure_result mx(qubit &q) {
   h(q);
   auto val = getExecutionManager()->measure(QuditInfo{q.n_levels(), q.id()});
-  return measure_result(val, details::nextMeasurementId());
+  return measure_result::make(val, details::nextMeasurementId());
 }
 
 // Measure an individual qubit in `y` basis, return as `measure_result`
@@ -445,7 +445,7 @@ inline measure_result my(qubit &q) {
   r1(-M_PI_2, q);
   h(q);
   auto val = getExecutionManager()->measure(QuditInfo{q.n_levels(), q.id()});
-  return measure_result(val, details::nextMeasurementId());
+  return measure_result::make(val, details::nextMeasurementId());
 }
 
 inline void reset(qubit &q) {
@@ -573,16 +573,6 @@ void __quantum__qis__logical_observable(cudaq::measure_result *results,
                                         std::size_t observable_index);
 }
 
-extern "C" {
-const char *__nvqir__getCircuitRepr();
-}
-
-/// Get a string representation of the recorded circuit from the
-/// active backend simulator (e.g., Stim circuit text).
-inline std::string getCircuitRepr() {
-  const char *repr = __nvqir__getCircuitRepr();
-  return repr ? std::string(repr) : std::string();
-}
 
 /// Declare a detector over one or more measurement results.
 /// A detector is a parity constraint: under noise-free execution the
@@ -614,6 +604,8 @@ inline void detectors_vectorized(const std::vector<measure_result> &prev,
 }
 
 /// Declare a logical observable over one or more measurement results.
+/// Uses observable_index = 0 by default. For codes with multiple logical
+/// qubits, use the vector overload with an explicit index.
 template <typename... MeasArgs>
 void logical_observable(MeasArgs &...ms) {
   static_assert((std::is_same_v<measure_result, MeasArgs> && ...),
@@ -623,6 +615,8 @@ void logical_observable(MeasArgs &...ms) {
 }
 
 /// Declare a logical observable from a vector of measurement results.
+/// @param observable_index  Index of this logical observable (0-based).
+///   Codes with k logical qubits should declare observables 0..k-1.
 inline void logical_observable(const std::vector<measure_result> &ms,
                                std::size_t observable_index = 0) {
   std::vector<measure_result> copy(ms.begin(), ms.end());

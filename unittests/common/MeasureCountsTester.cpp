@@ -72,11 +72,11 @@ CUDAQ_TEST(MeasureResultTester, checkConstructors) {
   static_assert(std::is_copy_assignable_v<cudaq::measure_result>);
   static_assert(std::is_move_assignable_v<cudaq::measure_result>);
 
-  cudaq::measure_result r1(int64_t(1));
+  auto r1 = cudaq::measure_result::make(1, 0);
   EXPECT_EQ(static_cast<int>(r1), 1);
   EXPECT_TRUE(static_cast<bool>(r1));
 
-  cudaq::measure_result r2(int64_t(0), int64_t(42));
+  auto r2 = cudaq::measure_result::make(0, 42);
   EXPECT_EQ(static_cast<int>(r2), 0);
   EXPECT_FALSE(static_cast<bool>(r2));
   EXPECT_NEAR(static_cast<double>(r2), 0.0, 1e-9);
@@ -89,14 +89,15 @@ CUDAQ_TEST(MeasureResultTester, checkConstructors) {
 }
 
 CUDAQ_TEST(MeasureResultTester, checkComparisons) {
-  cudaq::measure_result a(int64_t(1), int64_t(10));
-  cudaq::measure_result b(int64_t(1), int64_t(10));
-  cudaq::measure_result c(int64_t(0), int64_t(10));
-  cudaq::measure_result d(int64_t(1), int64_t(20));
+  auto a = cudaq::measure_result::make(1, 10);
+  auto b = cudaq::measure_result::make(1, 10);
+  auto c = cudaq::measure_result::make(0, 10);
+  auto d = cudaq::measure_result::make(1, 20);
 
+  // Equality compares measurement outcome (value), not identity (unique_id)
   EXPECT_TRUE(a == b);
   EXPECT_TRUE(a != c);
-  EXPECT_TRUE(a != d);
+  EXPECT_TRUE(a == d);
   EXPECT_TRUE(a == true);
   EXPECT_TRUE(true == a);
   EXPECT_TRUE(c == false);
