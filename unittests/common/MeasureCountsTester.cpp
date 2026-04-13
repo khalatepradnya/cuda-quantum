@@ -8,6 +8,7 @@
 
 #include "CUDAQTestUtils.h"
 #include "common/SampleResult.h"
+#include "cudaq/qis/detail/measure_result_shim.h"
 
 using namespace cudaq;
 
@@ -72,11 +73,11 @@ CUDAQ_TEST(MeasureResultTester, checkConstructors) {
   static_assert(std::is_copy_assignable_v<cudaq::measure_result>);
   static_assert(std::is_move_assignable_v<cudaq::measure_result>);
 
-  auto r1 = cudaq::measure_result::make(1, 0);
+  auto r1 = cudaq::detail::MeasureResultShim::create(1, 0);
   EXPECT_EQ(static_cast<int>(r1), 1);
   EXPECT_TRUE(static_cast<bool>(r1));
 
-  auto r2 = cudaq::measure_result::make(0, 42);
+  auto r2 = cudaq::detail::MeasureResultShim::create(0, 42);
   EXPECT_EQ(static_cast<int>(r2), 0);
   EXPECT_FALSE(static_cast<bool>(r2));
   EXPECT_NEAR(static_cast<double>(r2), 0.0, 1e-9);
@@ -89,10 +90,10 @@ CUDAQ_TEST(MeasureResultTester, checkConstructors) {
 }
 
 CUDAQ_TEST(MeasureResultTester, checkComparisons) {
-  auto a = cudaq::measure_result::make(1, 10);
-  auto b = cudaq::measure_result::make(1, 10);
-  auto c = cudaq::measure_result::make(0, 10);
-  auto d = cudaq::measure_result::make(1, 20);
+  auto a = cudaq::detail::MeasureResultShim::create(1, 10);
+  auto b = cudaq::detail::MeasureResultShim::create(1, 10);
+  auto c = cudaq::detail::MeasureResultShim::create(0, 10);
+  auto d = cudaq::detail::MeasureResultShim::create(1, 20);
 
   // Equality compares measurement outcome (value), not identity (unique_id)
   EXPECT_TRUE(a == b);

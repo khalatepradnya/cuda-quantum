@@ -12,7 +12,7 @@
 #include "cudaq/host_config.h"
 #include "cudaq/operators.h"
 #include "cudaq/platform.h"
-#include "cudaq/qis/measure_result.h"
+#include "cudaq/qis/detail/measure_result_shim.h"
 #include "cudaq/qis/modifiers.h"
 #include "cudaq/qis/pauli_word.h"
 #include "cudaq/qis/qarray.h"
@@ -430,14 +430,14 @@ inline std::int64_t nextMeasurementId() { return measurement_counter++; }
 /// @brief Measure an individual qubit, return as `measure_result`
 inline measure_result mz(qubit &q) {
   auto val = getExecutionManager()->measure(QuditInfo{q.n_levels(), q.id()});
-  return measure_result::make(val, details::nextMeasurementId());
+  return detail::MeasureResultShim::create(val, details::nextMeasurementId());
 }
 
 /// @brief Measure an individual qubit in `x` basis, return as `measure_result`
 inline measure_result mx(qubit &q) {
   h(q);
   auto val = getExecutionManager()->measure(QuditInfo{q.n_levels(), q.id()});
-  return measure_result::make(val, details::nextMeasurementId());
+  return detail::MeasureResultShim::create(val, details::nextMeasurementId());
 }
 
 // Measure an individual qubit in `y` basis, return as `measure_result`
@@ -445,7 +445,7 @@ inline measure_result my(qubit &q) {
   r1(-M_PI_2, q);
   h(q);
   auto val = getExecutionManager()->measure(QuditInfo{q.n_levels(), q.id()});
-  return measure_result::make(val, details::nextMeasurementId());
+  return detail::MeasureResultShim::create(val, details::nextMeasurementId());
 }
 
 inline void reset(qubit &q) {
@@ -564,12 +564,12 @@ to_bool_vector(const std::vector<measure_result> &results) {
 // lowered to qec.* MLIR ops.
 
 extern "C" {
-void __quantum__qis__detector(cudaq::measure_result *results,
+void __quantum__qis__detector(const cudaq::measure_result *results,
                               std::size_t count);
-void __quantum__qis__detectors_vectorized(cudaq::measure_result *prev,
-                                          cudaq::measure_result *curr,
+void __quantum__qis__detectors_vectorized(const cudaq::measure_result *prev,
+                                          const cudaq::measure_result *curr,
                                           std::size_t count);
-void __quantum__qis__logical_observable(cudaq::measure_result *results,
+void __quantum__qis__logical_observable(const cudaq::measure_result *results,
                                         std::size_t count,
                                         std::size_t observable_index);
 }
@@ -587,13 +587,7 @@ void detector(MeasArgs &...ms) {
 
 /// Declare a detector from a measurement collection.
 inline void detector(const measure_vector &ms) {
-  __quantum__qis__detector(const_cast<measure_result *>(ms.begin()), ms.size());
-}
-
-/// Backward-compatible overload; prefer const measure_vector& above.
-inline void detector(const std::vector<measure_result> &ms) {
-  std::vector<measure_result> copy(ms.begin(), ms.end());
-  __quantum__qis__detector(copy.data(), copy.size());
+  __quantum__qis__detector(ms.begin(), ms.size());
 }
 
 /// Declare N detectors by pairing two measurement collections element-wise.
@@ -603,20 +597,7 @@ inline void detectors_vectorized(const measure_vector &prev,
   if (prev.size() != curr.size())
     throw std::runtime_error(
         "detectors_vectorized: prev and curr must have equal length");
-  __quantum__qis__detectors_vectorized(
-      const_cast<measure_result *>(prev.begin()),
-      const_cast<measure_result *>(curr.begin()), prev.size());
-}
-
-/// Backward-compatible overload; prefer const measure_vector& above.
-inline void detectors_vectorized(const std::vector<measure_result> &prev,
-                                 const std::vector<measure_result> &curr) {
-  if (prev.size() != curr.size())
-    throw std::runtime_error(
-        "detectors_vectorized: prev and curr must have equal length");
-  std::vector<measure_result> p(prev.begin(), prev.end());
-  std::vector<measure_result> c(curr.begin(), curr.end());
-  __quantum__qis__detectors_vectorized(p.data(), c.data(), p.size());
+  __quantum__qis__detectors_vectorized(prev.begin(), curr.begin(), prev.size());
 }
 
 /// Declare a logical observable over one or more measurement results.
@@ -635,16 +616,13 @@ void logical_observable(MeasArgs &...ms) {
 ///   Codes with k logical qubits should declare observables 0..k-1.
 inline void logical_observable(const measure_vector &ms,
                                std::size_t observable_index = 0) {
-  __quantum__qis__logical_observable(const_cast<measure_result *>(ms.begin()),
-                                     ms.size(), observable_index);
+  __quantum__qis__logical_observable(ms.begin(), ms.size(), observable_index);
 }
 
-/// Backward-compatible overload; prefer const measure_vector& above.
+/// Backward-compatible overload; prefer `const` `measure_vector&` above.
 inline void logical_observable(const std::vector<measure_result> &ms,
                                std::size_t observable_index = 0) {
-  std::vector<measure_result> copy(ms.begin(), ms.end());
-  __quantum__qis__logical_observable(copy.data(), copy.size(),
-                                     observable_index);
+  __quantum__qis__logical_observable(ms.data(), ms.size(), observable_index);
 }
 
 // This concept tests if `Kernel` is a `Callable` that takes the arguments,

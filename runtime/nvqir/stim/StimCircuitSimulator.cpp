@@ -8,7 +8,7 @@
 
 #include "StimQECData.h"
 #include "common/FmtCore.h"
-#include "cudaq/qis/measure_result.h"
+#include "cudaq/qis/detail/measure_result_shim.h"
 #include "nvqir/CircuitSimulator.h"
 #include "stim.h"
 #include <any>
@@ -675,7 +675,7 @@ public:
           "detectors_vectorized: prev and curr must have equal length");
     for (std::size_t i = 0; i < prev.size(); i++) {
       cudaq::measure_result pair[2] = {prev[i], curr[i]};
-      auto mv = cudaq::make_measure_vector(pair, 2);
+      auto mv = cudaq::detail::MeasureResultShim::make_vector(pair, 2);
       detector(mv);
     }
   }

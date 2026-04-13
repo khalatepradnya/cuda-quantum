@@ -216,7 +216,7 @@ public:
   /// Store backend-specific metadata (overwrites any previous value).
   void setMetadata(std::any data) { metadata = std::move(data); }
 
-  /// Query backend-specific metadata by type. Returns nullptr if the
+  /// Query backend-specific metadata by type. Returns `nullptr` if the
   /// stored metadata is empty or does not match type T.
   template <typename T>
   const T *query() const {

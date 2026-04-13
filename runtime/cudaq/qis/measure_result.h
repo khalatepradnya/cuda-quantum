@@ -17,24 +17,27 @@ extern "C" {
 bool __nvqpp__MeasureResultBoolConversion(int);
 }
 
-/// We model the return type of a qubit measurement result via the
-/// `measure_result` type. This allows us to keep track of when the result is
-/// implicitly cast to a boolean (likely in the case of conditional feedback),
-/// and affect the simulation accordingly.
+namespace detail {
+struct MeasureResultShim;
+} // namespace detail
+
+/// The return type of a qubit measurement. Represents a post-measurement
+/// classical value tagged with a unique identity for backend correlation.
+/// Copy and move are allowed (this is classical data, not a quantum resource).
+/// Construction is restricted to the runtime via cudaq::detail.
 class measure_result {
   std::int64_t value = 0;
 
   /// Lookup key for backend-specific metadata. INT64_MAX means unassigned.
   std::int64_t unique_id = std::numeric_limits<std::int64_t>::max();
 
-public:
-  /// Factory for runtime construction (NVQIR and measurement functions).
-  static measure_result make(std::int64_t val, std::int64_t id) {
-    return measure_result(val, id);
-  }
+  explicit measure_result(std::int64_t val) : value(val) {}
+  explicit measure_result(std::int64_t val, std::int64_t id)
+      : value(val), unique_id(id) {}
 
-  // No default construction (measurements must come from mz/mx/my).
-  // Copy and move are allowed for cross-round detector patterns.
+  friend struct detail::MeasureResultShim;
+
+public:
   measure_result() = delete;
   measure_result(const measure_result &) = default;
   measure_result(measure_result &&) = default;
@@ -70,11 +73,6 @@ public:
   friend bool operator!=(bool b, const measure_result &m) {
     return b != static_cast<bool>(m);
   }
-
-private:
-  explicit measure_result(std::int64_t val) : value(val) {}
-  explicit measure_result(std::int64_t val, std::int64_t id)
-      : value(val), unique_id(id) {}
 };
 
 /// Immutable collection of measurement results. Maps to `!quake.measurements`
@@ -82,16 +80,15 @@ private:
 /// `std::vector<measure_result>` which exposed meaningless operations
 /// (push_back, resize, insert) that cannot be lowered to IR.
 ///
-/// No default construction, no copy, no move, no assignment -- like qvector.
-/// Created only by multi-qubit mz/mx/my and passed by const reference.
+/// No default construction, no copy, no move, no assignment - like `qvector`.
+/// Created only by multi-qubit `mz`/`mx`/`my` and passed by `const` reference.
 class measure_vector {
-  measure_result *data_;
+  const measure_result *data_;
   std::size_t size_;
 
-  // Only mz/mx/my and the runtime can construct these.
-  friend measure_vector make_measure_vector(measure_result *, std::size_t);
+  friend struct detail::MeasureResultShim;
 
-  measure_vector(measure_result *d, std::size_t n) : data_(d), size_(n) {}
+  measure_vector(const measure_result *d, std::size_t n) : data_(d), size_(n) {}
 
 public:
   measure_vector() = delete;
@@ -106,11 +103,5 @@ public:
   const measure_result *begin() const { return data_; }
   const measure_result *end() const { return data_ + size_; }
 };
-
-/// Runtime-internal factory. Not for user code.
-inline measure_vector make_measure_vector(measure_result *data,
-                                          std::size_t size) {
-  return measure_vector(data, size);
-}
 
 } // namespace cudaq

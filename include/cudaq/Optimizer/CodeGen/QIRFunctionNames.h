@@ -41,7 +41,7 @@ static constexpr const char QIRCustomAdjOp[] =
 static constexpr const char QIRExpPauli[] = "__quantum__qis__exp_pauli";
 
 /// QEC runtime function names (Result*-based, post-QIR lowering).
-/// The compiler passes Result* handles from mz calls; the QPU resolves
+/// The compiler passes Result* handles from `mz` calls; the QPU resolves
 /// measurement identity at runtime.
 static constexpr const char QIRDetectorFromResults[] =
     "__quantum__qis__detector_from_results";

@@ -22,8 +22,9 @@ def QEC_DetectorOp : QECOp<"detector"> {
     Declares a parity constraint over one or more measurement results.
     Under noise-free execution the XOR of the referenced measurements
     is deterministic. Operands may be individual `!quake.measure` values
-    or a `!quake.measurements<?>` collection. This operation has no side
-    effects and can be erased for backends that do not support it.
+    or a `!quake.measurements<?>` collection. This is a side-effecting
+    declaration that informs the backend. For backends that do not
+    support QEC, the EraseQEC pass removes these ops.
   }];
   let arguments = (ins
     Variadic<AnyTypeOf<[MeasureType, MeasurementsType]>>:$measurements
@@ -38,14 +39,16 @@ def QEC_DetectorsVectorizedOp : QECOp<"detectors_vectorized"> {
   let summary = "Declare N detectors by pairing prev and curr measurement vectors.";
   let description = [{
     Given two collections of measurement results, declares N detectors where
-    detector i is the parity of prev[i] and curr[i]. Both operands must be
-    `!quake.measurements<N>` with matching sizes.
+    detector i is the parity of prev[i] and curr[i]. When both operands have
+    a statically known size, the sizes must match. Unsized operands
+    (`!quake.measurements<?>`) are checked at runtime.
   }];
   let arguments = (ins
     MeasurementsType:$prev,
     MeasurementsType:$curr
   );
   let results = (outs);
+  let hasVerifier = 1;
   let assemblyFormat = [{
     `(` $prev `,` $curr `)` attr-dict `:` `(` type($prev) `,` type($curr) `)`
   }];

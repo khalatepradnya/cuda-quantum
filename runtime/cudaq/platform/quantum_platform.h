@@ -228,7 +228,7 @@ public:
   virtual void onRandomSeedSet(std::size_t seed);
 
   /// @brief Query backend-specific metadata by type from the QPU at @p qpu_id.
-  /// Returns nullptr if the backend did not produce metadata of type T.
+  /// Returns `nullptr` if the backend did not produce metadata of type T.
   template <typename T>
   const T *query(std::size_t qpu_id = 0) const {
     const std::any &raw = queryMetadataRaw(qpu_id);
