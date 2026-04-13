@@ -789,13 +789,6 @@ public:
   /// temporal ordering in recordedCircuit.
   const stim::Circuit &getRecordedCircuit() const { return recordedCircuit; }
 
-  /// Debug/test only. See getRecordedCircuit() warning above.
-  std::string getCircuitRepr() const override {
-    std::stringstream ss;
-    ss << recordedCircuit;
-    return ss.str();
-  }
-
   bool isStateVectorSimulator() const override { return false; }
 
   std::string name() const override { return "stim"; }

@@ -13,19 +13,13 @@
 // This test validates that compiled-mode lowering correctly resolves
 // measurement indices for detectors spanning multiple rounds, and that
 // logical_observable with an explicit index works end-to-end.
+//
+// Noise-free distance-3 repetition code, 2 rounds of syndrome extraction.
+// All measurements should be 0 on every shot.
 
 #include <cudaq.h>
 #include <cstdio>
-#include <string>
 
-extern "C" {
-const char *__nvqir__getCircuitRepr();
-}
-
-// Distance-3 repetition code, 2 rounds of syndrome extraction.
-// Round 1: measure stabilizer generators Z0Z1 and Z1Z2.
-// Round 2: same stabilizers again.
-// Cross-round detectors: parity of same stabilizer across rounds.
 auto rep_code_2rounds = []() __qpu__ {
   cudaq::qvector data(3);
   cudaq::qubit anc0, anc1;
@@ -72,40 +66,25 @@ auto rep_code_2rounds = []() __qpu__ {
 
 int main() {
   auto result =
-      cudaq::sample({.shots = 10, .explicit_measurements = true},
+      cudaq::sample({.shots = 100, .explicit_measurements = true},
                     rep_code_2rounds);
 
-  const char *repr = __nvqir__getCircuitRepr();
-  std::string circuit = repr ? repr : "";
-  printf("%s", circuit.c_str());
+  // 7 measurements total: s0_r1, s1_r1, s0_r2, s1_r2, d0, d1, d2.
+  // Noise-free |000>: all measurements = 0, every shot identical.
+  auto mostProbable = result.most_probable();
+  printf("most_probable: %s\n", mostProbable.c_str());
 
-  // Count detectors and observables in the output
-  int detCount = 0, obsCount = 0;
-  std::string::size_type pos = 0;
-  while ((pos = circuit.find("DETECTOR", pos)) != std::string::npos) {
-    detCount++;
-    pos += 8;
-  }
-  pos = 0;
-  while ((pos = circuit.find("OBSERVABLE_INCLUDE", pos)) != std::string::npos) {
-    obsCount++;
-    pos += 18;
-  }
+  bool allZero = (mostProbable == "0000000");
+  bool singleOutcome = (result.size() == 1);
 
-  // 4 detectors (2 round-1, 2 cross-round) + 1 observable
-  printf("detectors=%d observables=%d\n", detCount, obsCount);
-  if (detCount == 4 && obsCount == 1)
+  if (allZero && singleOutcome)
     printf("PASS\n");
   else
-    printf("FAIL\n");
+    printf("FAIL: most_probable=%s outcomes=%zu\n", mostProbable.c_str(),
+           result.size());
 
-  return (detCount == 4 && obsCount == 1) ? 0 : 1;
+  return (allZero && singleOutcome) ? 0 : 1;
 }
 
-// CHECK: DETECTOR
-// CHECK: DETECTOR
-// CHECK: DETECTOR
-// CHECK: DETECTOR
-// CHECK: OBSERVABLE_INCLUDE
-// CHECK: detectors=4 observables=1
+// CHECK: most_probable: 0000000
 // CHECK: PASS

@@ -816,16 +816,6 @@ void __quantum__qis__detectors_vectorized_indices(std::int64_t *prev_indices,
   }
 }
 
-// getCircuitRepr returns std::string so it cannot be extern "C".
-// We use a shared buffer to pass the string through a C-compatible interface.
-static thread_local std::string __nvqir_circuit_repr_buffer;
-
-const char *__nvqir__getCircuitRepr() {
-  __nvqir_circuit_repr_buffer =
-      nvqir::getCircuitSimulatorInternal()->getCircuitRepr();
-  return __nvqir_circuit_repr_buffer.c_str();
-}
-
 void __quantum__qis__apply_kraus_channel_double(std::int64_t krausChannelKey,
                                                 double *params,
                                                 std::size_t numParams,
