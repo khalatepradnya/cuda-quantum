@@ -20,9 +20,11 @@
 #include "resourcecounter/ResourceCounter.h"
 #include <cmath>
 #include <complex>
+#include <deque>
 #include <sstream>
 #include <string>
 #include <type_traits>
+#include <unordered_map>
 #include <vector>
 
 /// This file implements the primary QIR quantum-classical runtime API used
@@ -52,6 +54,16 @@ inline static constexpr std::string_view GetCircuitSimulatorSymbol =
 static thread_local std::map<Qubit *, Result *> measQB2Res;
 static thread_local std::map<Result *, Qubit *> measRes2QB;
 static thread_local std::map<Result *, Result> measRes2Val;
+
+// Pool of unique Result objects for Full QIR measurement identity.
+// Each __quantum__qis__mz call allocates a new Result here so that
+// the returned Result* is unique per measurement (unlike the
+// ResultOne/ResultZero singletons). std::deque gives stable addresses.
+static thread_local std::deque<Result> measResultPool;
+// Map from unique Result* (pool address) to chronological measurement index.
+static thread_local std::unordered_map<Result *, std::size_t>
+    resultPtrToChronoIdx;
+static thread_local std::size_t measChronoCounter = 0;
 
 /// @brief Provide a holder for externally created
 /// CircuitSimulator pointers (like from Python) that
@@ -301,9 +313,11 @@ void __quantum__rt__set_dynamic_qubit_management(bool isDynamic) {
 /// @brief QIR Initialization function
 void __quantum__rt__initialize(int argc, int8_t **argv) {
   if (!initialized) {
-    // We may need this init function later....
     initialized = true;
   }
+  measResultPool.clear();
+  resultPtrToChronoIdx.clear();
+  measChronoCounter = 0;
 }
 
 /// @brief Finalize the NVQIR library
@@ -639,7 +653,15 @@ Result *__quantum__qis__mz(Qubit *q) {
   auto qI = qubitToSizeT(q);
   ScopedTraceWithContext("NVQIR::mz", qI);
   auto b = nvqir::getCircuitSimulatorInternal()->mz(qI, "");
-  return b ? ResultOne : ResultZero;
+  // Allocate a unique Result per measurement so that the returned pointer
+  // carries measurement identity (not just the outcome value). This
+  // enables QEC detector lowering to pass Result* handles through to the
+  // runtime for identity resolution, rather than requiring compiler-side
+  // measurement index tracking.
+  measResultPool.push_back(b ? ResultOneVal : ResultZeroVal);
+  auto *r = &measResultPool.back();
+  resultPtrToChronoIdx[r] = measChronoCounter++;
+  return r;
 }
 
 Result *__quantum__qis__mz__body(Qubit *q, Result *r) {
@@ -669,7 +691,10 @@ Result *__quantum__qis__mz__to__register(Qubit *q, const char *name) {
   auto qI = qubitToSizeT(q);
   ScopedTraceWithContext("NVQIR::mz", qI, regName);
   auto b = nvqir::getCircuitSimulatorInternal()->mz(qI, regName);
-  return b ? ResultOne : ResultZero;
+  measResultPool.push_back(b ? ResultOneVal : ResultZeroVal);
+  auto *r = &measResultPool.back();
+  resultPtrToChronoIdx[r] = measChronoCounter++;
+  return r;
 }
 
 void __quantum__qis__exp_pauli(double theta, Array *qubits, char *pauliWord) {
@@ -776,6 +801,96 @@ void __quantum__qis__logical_observable(cudaq::measure_result *results,
                                                            observable_index);
 }
 
+// Result*-based QEC functions (compiled mode, post-QIR lowering).
+// The compiler passes Result* handles from mz calls through to these
+// functions. The QPU resolves measurement identity at runtime via
+// resultPtrToChronoIdx, eliminating compiler-side index resolution.
+
+void __quantum__qis__detector_from_results(Result **results,
+                                           std::int64_t count) {
+  std::vector<cudaq::measure_result> mrs;
+  mrs.reserve(count);
+  for (std::int64_t i = 0; i < count; i++) {
+    auto it = resultPtrToChronoIdx.find(results[i]);
+    std::size_t idx = (it != resultPtrToChronoIdx.end()) ? it->second : 0;
+    mrs.push_back(cudaq::measure_result::make(*results[i], idx));
+  }
+  nvqir::getCircuitSimulatorInternal()->detector(mrs, measChronoCounter);
+}
+
+void __quantum__qis__logical_observable_from_results(
+    Result **results, std::int64_t count, std::int64_t observable_index) {
+  std::vector<cudaq::measure_result> mrs;
+  mrs.reserve(count);
+  for (std::int64_t i = 0; i < count; i++) {
+    auto it = resultPtrToChronoIdx.find(results[i]);
+    std::size_t idx = (it != resultPtrToChronoIdx.end()) ? it->second : 0;
+    mrs.push_back(cudaq::measure_result::make(*results[i], idx));
+  }
+  nvqir::getCircuitSimulatorInternal()->logical_observable(
+      mrs, observable_index, measChronoCounter);
+}
+
+void __quantum__qis__detectors_vectorized_from_results(
+    Result **prev_results, Result **curr_results, std::int64_t count) {
+  for (std::int64_t i = 0; i < count; i++) {
+    auto prevIt = resultPtrToChronoIdx.find(prev_results[i]);
+    auto currIt = resultPtrToChronoIdx.find(curr_results[i]);
+    std::size_t prevIdx =
+        (prevIt != resultPtrToChronoIdx.end()) ? prevIt->second : 0;
+    std::size_t currIdx =
+        (currIt != resultPtrToChronoIdx.end()) ? currIt->second : 0;
+    std::vector<cudaq::measure_result> pair = {
+        cudaq::measure_result::make(*prev_results[i], prevIdx),
+        cudaq::measure_result::make(*curr_results[i], currIdx)};
+    nvqir::getCircuitSimulatorInternal()->detector(pair, measChronoCounter);
+  }
+}
+
+// Array*-based variants for measurement collections converted from
+// !quake.measurements<N>. The Array contains Result* elements.
+
+static std::vector<cudaq::measure_result>
+arrayToMeasureResults(Array *results) {
+  auto count = results->size();
+  std::vector<cudaq::measure_result> mrs;
+  mrs.reserve(count);
+  for (std::size_t i = 0; i < count; i++) {
+    auto *elemPtr = (*results)[i];
+    auto *result = *reinterpret_cast<Result **>(elemPtr);
+    auto it = resultPtrToChronoIdx.find(result);
+    std::size_t idx = (it != resultPtrToChronoIdx.end()) ? it->second : 0;
+    mrs.push_back(cudaq::measure_result::make(*result, idx));
+  }
+  return mrs;
+}
+
+void __quantum__qis__detector_from_array(Array *results) {
+  auto mrs = arrayToMeasureResults(results);
+  nvqir::getCircuitSimulatorInternal()->detector(mrs, measChronoCounter);
+}
+
+void __quantum__qis__logical_observable_from_array(Array *results,
+                                                   std::int64_t obsIdx) {
+  auto mrs = arrayToMeasureResults(results);
+  nvqir::getCircuitSimulatorInternal()->logical_observable(mrs, obsIdx,
+                                                           measChronoCounter);
+}
+
+void __quantum__qis__detectors_vectorized_from_arrays(Array *prev,
+                                                      Array *curr) {
+  auto prevMrs = arrayToMeasureResults(prev);
+  auto currMrs = arrayToMeasureResults(curr);
+  auto count = std::min(prevMrs.size(), currMrs.size());
+  for (std::size_t i = 0; i < count; i++) {
+    std::vector<cudaq::measure_result> pair = {prevMrs[i], currMrs[i]};
+    nvqir::getCircuitSimulatorInternal()->detector(pair, measChronoCounter);
+  }
+}
+
+// Deprecated: index-based variants (compiler-resolved indices).
+// Kept for backward compatibility with library-mode callers.
+// TODO(#qec): remove once all callers migrate to Result*-based functions.
 void __quantum__qis__detector_indices(std::int64_t *indices, std::size_t count,
                                       std::size_t total_measurements) {
   std::vector<cudaq::measure_result> mrs;
@@ -808,8 +923,6 @@ void __quantum__qis__detectors_vectorized_indices(std::int64_t *prev_indices,
     prev.push_back(cudaq::measure_result::make(0, prev_indices[i]));
     curr.push_back(cudaq::measure_result::make(0, curr_indices[i]));
   }
-  // The simulator's detectors_vectorized expands to N individual detectors.
-  // Pass totalMeasurements so compiled-mode lookback is correct.
   for (std::size_t i = 0; i < count; i++) {
     std::vector<cudaq::measure_result> pair = {prev[i], curr[i]};
     nvqir::getCircuitSimulatorInternal()->detector(pair, total_measurements);

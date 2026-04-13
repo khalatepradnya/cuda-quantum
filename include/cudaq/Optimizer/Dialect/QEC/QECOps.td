@@ -16,16 +16,11 @@ include "mlir/IR/OpBase.td"
 class QECOp<string mnemonic, list<Trait> traits = []>
     : Op<QECDialect, mnemonic, traits>;
 
-// Operand type for detector/observable: either a single !quake.measure
-// or a collection !quake.measurements<?>. These are the native Quake types
-// produced by quake.mz -- using them here (instead of cc.stdvec) means
-// QEC ops live at the Quake abstraction level and don't depend on CC
-// lowering having run first. !quake.measurements<?> is the IR-level
-// representation of cudaq::measure_vector.
-def QEC_MeasureOrMeasurements : AnyTypeOf<[
-  MeasureType,
-  MeasurementsType
-]>;
+// Operand type for detector/observable. Before QIR conversion these are
+// !quake.measure / !quake.measurements<?>. After QIR conversion (when the
+// LowerQECToQIR pass now runs) they become Result* / Array* pointer types.
+// Using AnyType so the ops survive type conversion without requiring
+// unrealized_conversion_cast materialization.
 
 def QEC_DetectorOp : QECOp<"detector"> {
   let summary = "Declare a detector over measurement results.";
@@ -37,7 +32,7 @@ def QEC_DetectorOp : QECOp<"detector"> {
     effects and can be erased for backends that do not support it.
   }];
   let arguments = (ins
-    Variadic<QEC_MeasureOrMeasurements>:$measurements
+    Variadic<AnyType>:$measurements
   );
   let results = (outs);
   let assemblyFormat = [{
@@ -53,8 +48,8 @@ def QEC_DetectorsVectorizedOp : QECOp<"detectors_vectorized"> {
     `!quake.measurements<N>` with matching sizes.
   }];
   let arguments = (ins
-    MeasurementsType:$prev,
-    MeasurementsType:$curr
+    AnyType:$prev,
+    AnyType:$curr
   );
   let results = (outs);
   let assemblyFormat = [{
@@ -70,7 +65,7 @@ def QEC_LogicalObservableOp : QECOp<"logical_observable"> {
     `!quake.measurements<?>` collection.
   }];
   let arguments = (ins
-    Variadic<QEC_MeasureOrMeasurements>:$measurements,
+    Variadic<AnyType>:$measurements,
     DefaultValuedOptionalAttr<I64Attr, "0">:$observableIndex
   );
   let results = (outs);

@@ -18,6 +18,7 @@
 #include "cudaq/Optimizer/CodeGen/QuakeToExecMgr.h"
 #include "cudaq/Optimizer/Dialect/CC/CCDialect.h"
 #include "cudaq/Optimizer/Dialect/CC/CCOps.h"
+#include "cudaq/Optimizer/Dialect/QEC/QECOps.h"
 #include "cudaq/Optimizer/Dialect/Quake/QuakeDialect.h"
 #include "cudaq/Optimizer/Dialect/Quake/QuakeOps.h"
 #include "cudaq/Optimizer/Transforms/Passes.h" // for GlobalizeArrayValues
@@ -2267,6 +2268,52 @@ static void commonQuakeHandlingPatterns(RewritePatternSet &patterns,
                                                                 ctx);
 }
 
+// QEC ops survive QIR conversion with updated operand types.
+// These patterns recreate the ops with type-converted operands so the
+// conversion framework doesn't need materialization callbacks.
+
+struct DetectorOpConversion : OpConversionPattern<qec::DetectorOp> {
+  using OpConversionPattern::OpConversionPattern;
+  LogicalResult
+  matchAndRewrite(qec::DetectorOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    rewriter.replaceOpWithNewOp<qec::DetectorOp>(op,
+                                                  adaptor.getMeasurements());
+    return success();
+  }
+};
+
+struct LogicalObservableOpConversion
+    : OpConversionPattern<qec::LogicalObservableOp> {
+  using OpConversionPattern::OpConversionPattern;
+  LogicalResult
+  matchAndRewrite(qec::LogicalObservableOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    rewriter.replaceOpWithNewOp<qec::LogicalObservableOp>(
+        op, adaptor.getMeasurements(), op.getObservableIndexAttr());
+    return success();
+  }
+};
+
+struct DetectorsVectorizedOpConversion
+    : OpConversionPattern<qec::DetectorsVectorizedOp> {
+  using OpConversionPattern::OpConversionPattern;
+  LogicalResult
+  matchAndRewrite(qec::DetectorsVectorizedOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    rewriter.replaceOpWithNewOp<qec::DetectorsVectorizedOp>(
+        op, adaptor.getPrev(), adaptor.getCurr());
+    return success();
+  }
+};
+
+static void addQECConversionPatterns(RewritePatternSet &patterns,
+                                     TypeConverter &typeConverter,
+                                     MLIRContext *ctx) {
+  patterns.insert<DetectorOpConversion, LogicalObservableOpConversion,
+                  DetectorsVectorizedOpConversion>(typeConverter, ctx);
+}
+
 //===----------------------------------------------------------------------===//
 // Modifier classes
 //===----------------------------------------------------------------------===//
@@ -2471,12 +2518,23 @@ struct QuakeToQIRAPIPass
     auto *ctx = &getContext();
     RewritePatternSet patterns(ctx);
     A::populateRewritePatterns(patterns, typeConverter);
+    addQECConversionPatterns(patterns, typeConverter, ctx);
     ConversionTarget target(*ctx);
     target.addLegalDialect<arith::ArithDialect, cudaq::cc::CCDialect,
                            cf::ControlFlowDialect, func::FuncDialect,
                            LLVM::LLVMDialect>();
     target.addIllegalDialect<quake::QuakeDialect,
                              cudaq::codegen::CodeGenDialect>();
+    // QEC ops are legal once their operands have been converted from
+    // quake types to QIR types (Result* / Array*).
+    target.addDynamicallyLegalOp<qec::DetectorOp, qec::LogicalObservableOp,
+                                 qec::DetectorsVectorizedOp>(
+        [&](Operation *op) {
+          for (auto opnd : op->getOperands())
+            if (hasQuakeType(opnd.getType()))
+              return false;
+          return true;
+        });
     target.addLegalOp<cudaq::codegen::MaterializeConstantArrayOp>();
     target.addDynamicallyLegalOp<func::FuncOp>([&](func::FuncOp fn) {
       return !hasQuakeType(fn.getFunctionType()) &&

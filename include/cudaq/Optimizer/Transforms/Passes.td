@@ -434,17 +434,16 @@ def DistributedDeviceCall : Pass<"distributed-device-call", "mlir::ModuleOp"> {
 def LowerQECToQIR : Pass<"lower-qec-to-qir"> {
   let summary = "Lower QEC operations to QIR runtime calls.";
   let description = [{
-    Lowers qec.detector and qec.logical_observable operations to
-    func.call operations targeting __quantum__qis__detector_indices and
-    __quantum__qis__logical_observable_indices runtime functions. Each
-    measurement operand is mapped to its chronological index (assigned
-    by walking all quake.mz ops in program order). The indices are
-    passed as a stack-allocated i64 array to the runtime function.
+    Lowers qec.detector, qec.logical_observable, and
+    qec.detectors_vectorized operations to runtime function calls.
 
-    This enables QEC annotations to reach backends that support them
-    (e.g., Stim) through the standard NVQIR dispatch mechanism.
-    Backends without QEC support have default no-op implementations
-    of these functions in CircuitSimulatorBase.
+    This pass runs AFTER QIR conversion, so operands are already
+    %Result* (from converted mz calls) or %Array* (from converted
+    multi-qubit measurement collections). The pass packs Result*
+    operands into stack-allocated arrays and calls runtime functions
+    that accept Result** or Array*. The QPU resolves measurement
+    identity at runtime from the Result* handles, eliminating the
+    need for compiler-side measurement index resolution.
   }];
   let dependentDialects = [
     "cudaq::cc::CCDialect",

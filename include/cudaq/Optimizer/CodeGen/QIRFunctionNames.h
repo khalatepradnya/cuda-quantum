@@ -40,13 +40,22 @@ static constexpr const char QIRCustomAdjOp[] =
     "__quantum__qis__custom_unitary__adj";
 static constexpr const char QIRExpPauli[] = "__quantum__qis__exp_pauli";
 
-/// QEC runtime function names (index-based, for compiled mode)
-static constexpr const char QIRDetectorIndices[] =
-    "__quantum__qis__detector_indices";
-static constexpr const char QIRLogicalObservableIndices[] =
-    "__quantum__qis__logical_observable_indices";
-static constexpr const char QIRDetectorsVectorizedIndices[] =
-    "__quantum__qis__detectors_vectorized_indices";
+/// QEC runtime function names (Result*-based, post-QIR lowering).
+/// The compiler passes Result* handles from mz calls; the QPU resolves
+/// measurement identity at runtime.
+static constexpr const char QIRDetectorFromResults[] =
+    "__quantum__qis__detector_from_results";
+static constexpr const char QIRLogicalObservableFromResults[] =
+    "__quantum__qis__logical_observable_from_results";
+static constexpr const char QIRDetectorsVectorizedFromResults[] =
+    "__quantum__qis__detectors_vectorized_from_results";
+/// Array*-based variants for measurement collections.
+static constexpr const char QIRDetectorFromArray[] =
+    "__quantum__qis__detector_from_array";
+static constexpr const char QIRLogicalObservableFromArray[] =
+    "__quantum__qis__logical_observable_from_array";
+static constexpr const char QIRDetectorsVectorizedFromArrays[] =
+    "__quantum__qis__detectors_vectorized_from_arrays";
 
 static constexpr const char NVQIRInvokeWithControlBits[] =
     "invokeWithControlQubits";
