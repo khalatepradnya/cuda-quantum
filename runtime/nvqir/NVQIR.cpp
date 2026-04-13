@@ -888,47 +888,6 @@ void __quantum__qis__detectors_vectorized_from_arrays(Array *prev,
   }
 }
 
-// Deprecated: index-based variants (compiler-resolved indices).
-// Kept for backward compatibility with library-mode callers.
-// TODO(#qec): remove once all callers migrate to Result*-based functions.
-void __quantum__qis__detector_indices(std::int64_t *indices, std::size_t count,
-                                      std::size_t total_measurements) {
-  std::vector<cudaq::measure_result> mrs;
-  mrs.reserve(count);
-  for (std::size_t i = 0; i < count; i++)
-    mrs.push_back(cudaq::measure_result::make(0, indices[i]));
-  nvqir::getCircuitSimulatorInternal()->detector(mrs, total_measurements);
-}
-
-void __quantum__qis__logical_observable_indices(std::int64_t *indices,
-                                                std::size_t count,
-                                                std::size_t total_measurements,
-                                                std::size_t observable_index) {
-  std::vector<cudaq::measure_result> mrs;
-  mrs.reserve(count);
-  for (std::size_t i = 0; i < count; i++)
-    mrs.push_back(cudaq::measure_result::make(0, indices[i]));
-  nvqir::getCircuitSimulatorInternal()->logical_observable(
-      mrs, observable_index, total_measurements);
-}
-
-void __quantum__qis__detectors_vectorized_indices(std::int64_t *prev_indices,
-                                                   std::int64_t *curr_indices,
-                                                   std::size_t count,
-                                                   std::size_t total_measurements) {
-  std::vector<cudaq::measure_result> prev, curr;
-  prev.reserve(count);
-  curr.reserve(count);
-  for (std::size_t i = 0; i < count; i++) {
-    prev.push_back(cudaq::measure_result::make(0, prev_indices[i]));
-    curr.push_back(cudaq::measure_result::make(0, curr_indices[i]));
-  }
-  for (std::size_t i = 0; i < count; i++) {
-    std::vector<cudaq::measure_result> pair = {prev[i], curr[i]};
-    nvqir::getCircuitSimulatorInternal()->detector(pair, total_measurements);
-  }
-}
-
 void __quantum__qis__apply_kraus_channel_double(std::int64_t krausChannelKey,
                                                 double *params,
                                                 std::size_t numParams,

@@ -279,44 +279,8 @@ protected:
     }
   }
 
-  /// @deprecated Prefer getMetadata() + query<StimQECData>(). This method
-  /// writes to ExecutionContext fields which are being phased out.
-  void flushDetectorMatrixToContext() {
-    auto *ctx = getExecutionContext();
-    if (!ctx)
-      return;
-
-    std::size_t numMeas = num_measurements;
-    if (numMeas == 0)
-      return;
-
-    if (!detectorRows.empty()) {
-      std::size_t numDet = detectorRows.size();
-      std::vector<uint8_t> D(numDet * numMeas, 0);
-      for (std::size_t d = 0; d < numDet; d++)
-        for (auto mIdx : detectorRows[d])
-          if (mIdx < numMeas)
-            D[d * numMeas + mIdx] = 1;
-      ctx->detector_matrix = std::move(D);
-      ctx->detector_dimensions = {numDet, numMeas};
-    }
-
-    if (!observableRows.empty()) {
-      std::size_t maxObs = observableRows.rbegin()->first + 1;
-      std::vector<uint8_t> O(maxObs * numMeas, 0);
-      for (auto &[obsIdx, measIds] : observableRows)
-        for (auto mIdx : measIds)
-          if (mIdx < numMeas)
-            O[obsIdx * numMeas + mIdx] = 1;
-      ctx->observable_matrix = std::move(O);
-      ctx->observable_dimensions = {maxObs, numMeas};
-    }
-  }
-
   /// @brief Reset the qubit state.
   void deallocateStateImpl() override {
-    flushDetectorMatrixToContext();
-
     // Snapshot QEC data before clearing, so getMetadata() can return it
     // after deallocation completes.
     if (!detectorRows.empty() || !observableRows.empty()) {
@@ -802,10 +766,6 @@ public:
   ///   2. Run with msm context to populate detector_matrix and
   ///      observable_matrix on ExecutionContext
   ///   3. Compute H = D @ S mod 2 to get the DEM
-  ///
-  /// The detector_matrix uses absolute measurement indices (populated by
-  /// flushDetectorMatrixToContext), which are correct regardless of the
-  /// temporal ordering in recordedCircuit.
   const stim::Circuit &getRecordedCircuit() const { return recordedCircuit; }
 
   std::any getMetadata() const override { return cachedMetadata; }
