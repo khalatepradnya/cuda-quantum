@@ -453,7 +453,9 @@ inline void reset(qubit &q) {
 }
 
 // Measure all qubits in the range.
-// TODO: return type will change to cudaq::measure_vector (see spec).
+// TODO(Stage 2): return cudaq::measure_vector instead of std::vector.
+// The class exists (measure_result.h) but changing mz() return types is
+// a breaking change that needs its own PR with test migration.
 template <typename QubitRange>
   requires std::ranges::range<QubitRange>
 std::vector<measure_result> mz(QubitRange &q) {
@@ -519,7 +521,7 @@ inline SpinMeasureResult measure(const cudaq::spin_op &term) {
   return getExecutionManager()->measure(term);
 }
 
-// TODO: will become measure_vector::operator std::int64_t() (see spec).
+// TODO(Stage 2): move to measure_vector::operator std::int64_t().
 inline std::int64_t to_integer(const std::vector<measure_result> &bits) {
   std::int64_t ret = 0;
   for (std::size_t i = 0; i < bits.size(); i++) {
@@ -546,8 +548,7 @@ inline std::int64_t to_integer(const std::string &arg) {
   return std::stoull(bitString, nullptr, 2);
 }
 
-// TODO: will be replaced by measure_vector::operator std::vector<bool>() (see
-// spec).
+// TODO(Stage 2): move to measure_vector::operator std::vector<bool>().
 inline std::vector<bool>
 to_bool_vector(const std::vector<measure_result> &results) {
   std::vector<bool> out;
@@ -585,14 +586,31 @@ void detector(MeasArgs &...ms) {
   __quantum__qis__detector(arr, sizeof...(ms));
 }
 
-/// Declare a detector from a vector of measurement results.
+/// Declare a detector from a measurement collection.
+inline void detector(const measure_vector &ms) {
+  __quantum__qis__detector(const_cast<measure_result *>(ms.begin()),
+                           ms.size());
+}
+
+/// Backward-compatible overload; prefer const measure_vector& above.
 inline void detector(const std::vector<measure_result> &ms) {
   std::vector<measure_result> copy(ms.begin(), ms.end());
   __quantum__qis__detector(copy.data(), copy.size());
 }
 
-/// Declare N detectors by pairing two measurement vectors element-wise.
+/// Declare N detectors by pairing two measurement collections element-wise.
 /// This is the standard form for cross-round detectors.
+inline void detectors_vectorized(const measure_vector &prev,
+                                 const measure_vector &curr) {
+  if (prev.size() != curr.size())
+    throw std::runtime_error(
+        "detectors_vectorized: prev and curr must have equal length");
+  __quantum__qis__detectors_vectorized(
+      const_cast<measure_result *>(prev.begin()),
+      const_cast<measure_result *>(curr.begin()), prev.size());
+}
+
+/// Backward-compatible overload; prefer const measure_vector& above.
 inline void detectors_vectorized(const std::vector<measure_result> &prev,
                                  const std::vector<measure_result> &curr) {
   if (prev.size() != curr.size())
@@ -614,9 +632,16 @@ void logical_observable(MeasArgs &...ms) {
   __quantum__qis__logical_observable(arr, sizeof...(ms), 0);
 }
 
-/// Declare a logical observable from a vector of measurement results.
+/// Declare a logical observable from a measurement collection.
 /// @param observable_index  Index of this logical observable (0-based).
 ///   Codes with k logical qubits should declare observables 0..k-1.
+inline void logical_observable(const measure_vector &ms,
+                               std::size_t observable_index = 0) {
+  __quantum__qis__logical_observable(
+      const_cast<measure_result *>(ms.begin()), ms.size(), observable_index);
+}
+
+/// Backward-compatible overload; prefer const measure_vector& above.
 inline void logical_observable(const std::vector<measure_result> &ms,
                                std::size_t observable_index = 0) {
   std::vector<measure_result> copy(ms.begin(), ms.end());

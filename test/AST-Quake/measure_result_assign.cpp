@@ -17,5 +17,7 @@ __qpu__ bool assign_kernel() {
   return static_cast<bool>(results[0]);
 }
 
-// CHECK: error:{{.*}}deleted operator '='
-// CHECK: error: C++ source has errors
+// Element assignment into a measurements collection cannot be lowered
+// to IR. measure_result copy is allowed (cross-round detectors need it)
+// but writing back into !quake.measurements<?> is not supported.
+// CHECK: error:{{.*}}not yet implemented: unknown function

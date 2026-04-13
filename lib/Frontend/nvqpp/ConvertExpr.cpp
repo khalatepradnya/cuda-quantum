@@ -2378,11 +2378,43 @@ bool QuakeBridgeVisitor::VisitCallExpr(clang::CallExpr *x) {
     }
 
     if (funcName == "detector") {
+      // Validate that all arguments are measurement types. Without this
+      // check, a misuse like cudaq::detector(someInt) creates an IR op
+      // with wrong operand types that only fails later in LowerQECToQIR
+      // with a hard-to-diagnose error about missing measurement indices.
+      for (auto arg : args) {
+        auto ty = arg.getType();
+        if (!isa<quake::MeasureType, quake::MeasurementsType>(ty))
+          reportClangError(x, mangler,
+                           "detector argument must be a measure_result or "
+                           "measure_vector (measurements collection)");
+      }
       builder.create<qec::DetectorOp>(loc, args);
       return true;
     }
     if (funcName == "logical_observable") {
-      builder.create<qec::LogicalObservableOp>(loc, args);
+      // The vector overload has signature (measurements, observable_index).
+      // The variadic template overload has only measure args (index=0).
+      // Detect the integer trailing argument so that codes with k>1
+      // logical qubits can declare distinct observables in compiled mode.
+      SmallVector<Value> measArgs(args);
+      std::int64_t obsIdx = 0;
+      if (!measArgs.empty() &&
+          measArgs.back().getType().isIntOrIndex()) {
+        if (auto cst = measArgs.back().getDefiningOp<arith::ConstantIntOp>())
+          obsIdx = cst.value();
+        measArgs.pop_back();
+      }
+      for (auto arg : measArgs) {
+        auto ty = arg.getType();
+        if (!isa<quake::MeasureType, quake::MeasurementsType>(ty))
+          reportClangError(x, mangler,
+                           "logical_observable argument must be a "
+                           "measure_result or measure_vector "
+                           "(measurements collection)");
+      }
+      builder.create<qec::LogicalObservableOp>(
+          loc, measArgs, builder.getI64IntegerAttr(obsIdx));
       return true;
     }
     if (funcName == "detectors_vectorized" && args.size() == 2) {

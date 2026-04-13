@@ -446,6 +446,11 @@ def LowerQECToQIR : Pass<"lower-qec-to-qir"> {
     Backends without QEC support have default no-op implementations
     of these functions in CircuitSimulatorBase.
   }];
+  let dependentDialects = [
+    "cudaq::cc::CCDialect",
+    "mlir::arith::ArithDialect",
+    "mlir::func::FuncDialect"
+  ];
 }
 
 def EraseNoise : Pass<"erase-noise"> {

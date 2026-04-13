@@ -10,6 +10,7 @@
 #include "cudaq/qis/measure_result.h"
 #include "nvqir/CircuitSimulator.h"
 #include "stim.h"
+#include <limits>
 #include <numeric>
 
 using namespace cudaq;
@@ -668,13 +669,25 @@ public:
     std::vector<uint32_t> targets;
     std::vector<std::size_t> measIndices;
     for (const auto &r : results) {
+      auto uid = r.get_unique_id();
+      // INT64_MAX is the sentinel for "unassigned" unique_id (e.g.,
+      // default-constructed measure_result). Computing num_measurements -
+      // INT64_MAX would underflow to a garbage lookback. Skip this entry
+      // with a diagnostic rather than producing a corrupt DETECTOR instruction.
+      if (uid == std::numeric_limits<std::int64_t>::max()) {
+        CUDAQ_INFO("detector: skipping measure_result with unassigned "
+                   "unique_id (sentinel INT64_MAX)");
+        continue;
+      }
       uint32_t lookback =
-          static_cast<uint32_t>(num_measurements - r.get_unique_id());
+          static_cast<uint32_t>(num_measurements - uid);
       targets.push_back(lookback | stim::TARGET_RECORD_BIT);
-      measIndices.push_back(static_cast<std::size_t>(r.get_unique_id()));
+      measIndices.push_back(static_cast<std::size_t>(uid));
     }
-    recordedCircuit.safe_append_u("DETECTOR", targets);
-    detectorRows.push_back(std::move(measIndices));
+    if (!targets.empty())
+      recordedCircuit.safe_append_u("DETECTOR", targets);
+    if (!measIndices.empty())
+      detectorRows.push_back(std::move(measIndices));
   }
 
   void detectors_vectorized(
@@ -696,28 +709,43 @@ public:
     std::vector<uint32_t> targets;
     std::vector<std::size_t> measIndices;
     for (const auto &r : results) {
+      auto uid = r.get_unique_id();
+      if (uid == std::numeric_limits<std::int64_t>::max())
+        continue;
       uint32_t lookback =
-          static_cast<uint32_t>(num_measurements - r.get_unique_id());
+          static_cast<uint32_t>(num_measurements - uid);
       targets.push_back(lookback | stim::TARGET_RECORD_BIT);
-      measIndices.push_back(static_cast<std::size_t>(r.get_unique_id()));
+      measIndices.push_back(static_cast<std::size_t>(uid));
     }
-    recordedCircuit.safe_append_ua("OBSERVABLE_INCLUDE", targets,
-                                   static_cast<double>(observable_index));
-    observableRows[observable_index] = std::move(measIndices);
+    if (!targets.empty())
+      recordedCircuit.safe_append_ua("OBSERVABLE_INCLUDE", targets,
+                                     static_cast<double>(observable_index));
+    if (!measIndices.empty())
+      observableRows[observable_index] = std::move(measIndices);
   }
 
+  // Compiled-mode overloads: use compiler-provided totalMeasurements instead
+  // of the runtime num_measurements counter (which is zero during deferred-
+  // measurement sampling in cudaq::sample). The compiler resolves each
+  // !quake.measure SSA value to a chronological index at compile time and
+  // passes it via the unique_id field.
   void detector(const std::vector<cudaq::measure_result> &results,
                 std::size_t totalMeasurements) override {
     std::vector<uint32_t> targets;
     std::vector<std::size_t> measIndices;
     for (const auto &r : results) {
+      auto uid = r.get_unique_id();
+      if (uid == std::numeric_limits<std::int64_t>::max())
+        continue;
       uint32_t lookback =
-          static_cast<uint32_t>(totalMeasurements - r.get_unique_id());
+          static_cast<uint32_t>(totalMeasurements - uid);
       targets.push_back(lookback | stim::TARGET_RECORD_BIT);
-      measIndices.push_back(static_cast<std::size_t>(r.get_unique_id()));
+      measIndices.push_back(static_cast<std::size_t>(uid));
     }
-    recordedCircuit.safe_append_u("DETECTOR", targets);
-    detectorRows.push_back(std::move(measIndices));
+    if (!targets.empty())
+      recordedCircuit.safe_append_u("DETECTOR", targets);
+    if (!measIndices.empty())
+      detectorRows.push_back(std::move(measIndices));
   }
 
   void logical_observable(const std::vector<cudaq::measure_result> &results,
@@ -726,22 +754,42 @@ public:
     std::vector<uint32_t> targets;
     std::vector<std::size_t> measIndices;
     for (const auto &r : results) {
+      auto uid = r.get_unique_id();
+      if (uid == std::numeric_limits<std::int64_t>::max())
+        continue;
       uint32_t lookback =
-          static_cast<uint32_t>(totalMeasurements - r.get_unique_id());
+          static_cast<uint32_t>(totalMeasurements - uid);
       targets.push_back(lookback | stim::TARGET_RECORD_BIT);
-      measIndices.push_back(static_cast<std::size_t>(r.get_unique_id()));
+      measIndices.push_back(static_cast<std::size_t>(uid));
     }
-    recordedCircuit.safe_append_ua("OBSERVABLE_INCLUDE", targets,
-                                   static_cast<double>(observable_index));
-    observableRows[observable_index] = std::move(measIndices);
+    if (!targets.empty())
+      recordedCircuit.safe_append_ua("OBSERVABLE_INCLUDE", targets,
+                                     static_cast<double>(observable_index));
+    if (!measIndices.empty())
+      observableRows[observable_index] = std::move(measIndices);
   }
 
-  /// @brief Get the recorded Stim circuit. Debug/test only -- in compiled mode
-  /// the ordering may be wrong (DETECTOR before M). Production DEM generation
-  /// should use the D @ S path via detector_matrix on ExecutionContext.
+  /// @brief Get the recorded Stim circuit.
+  ///
+  /// WARNING: In cudaq::sample mode, measurements are deferred
+  /// (handleBasicSampling returns true), so measureQubit() is never called
+  /// during kernel execution. DETECTOR/OBSERVABLE_INCLUDE instructions appear
+  /// in the circuit before the corresponding M instructions. Stim's
+  /// circuit.detector_error_model() requires M to precede DETECTOR, so direct
+  /// DEM generation from this circuit will fail in compiled mode.
+  ///
+  /// Production DEM generation should use the D @ S path:
+  ///   1. Run with msm_size context to get matrix dimensions
+  ///   2. Run with msm context to populate detector_matrix and
+  ///      observable_matrix on ExecutionContext
+  ///   3. Compute H = D @ S mod 2 to get the DEM
+  ///
+  /// The detector_matrix uses absolute measurement indices (populated by
+  /// flushDetectorMatrixToContext), which are correct regardless of the
+  /// temporal ordering in recordedCircuit.
   const stim::Circuit &getRecordedCircuit() const { return recordedCircuit; }
 
-  /// Debug/test only. See getRecordedCircuit() note above.
+  /// Debug/test only. See getRecordedCircuit() warning above.
   std::string getCircuitRepr() const override {
     std::stringstream ss;
     ss << recordedCircuit;

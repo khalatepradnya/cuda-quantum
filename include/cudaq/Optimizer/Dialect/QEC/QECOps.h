@@ -9,6 +9,7 @@
 #pragma once
 
 #include "cudaq/Optimizer/Dialect/QEC/QECDialect.h"
+#include "cudaq/Optimizer/Dialect/Quake/QuakeTypes.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/OpDefinition.h"

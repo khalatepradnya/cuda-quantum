@@ -173,6 +173,9 @@ bool QuakeBridgeVisitor::interceptRecordDecl(clang::RecordDecl *x) {
     // Measurement result type.
     if (name == "measure_result")
       return pushType(quake::MeasureType::get(ctx));
+    // Immutable measurement collection, maps to !quake.measurements<?>.
+    if (name == "measure_vector")
+      return pushType(quake::MeasurementsType::getUnsized(ctx));
     if (!isInNamespace(x, "solvers") && !isInNamespace(x, "qec")) {
       auto loc = toLocation(x);
       TODO_loc(loc, "unhandled type, " + name + ", in cudaq namespace");
@@ -192,8 +195,9 @@ bool QuakeBridgeVisitor::interceptRecordDecl(clang::RecordDecl *x) {
                               "std::vector element type is not supported");
         return false;
       }
-      // TODO: std::vector<measure_result> will be replaced by
-      // cudaq::measure_vector, recognized directly by class name (see spec).
+      // std::vector<measure_result> maps to the same IR type as
+      // cudaq::measure_vector (!quake.measurements<?>). Kept for backward
+      // compatibility; new code should use cudaq::measure_vector.
       if (isa<quake::MeasureType>(ty))
         return pushType(quake::MeasurementsType::getUnsized(ctx));
       return pushType(cc::StdvecType::get(ctx, ty));

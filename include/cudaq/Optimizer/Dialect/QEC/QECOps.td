@@ -10,14 +10,22 @@
 #define CUDAQ_OPTIMIZER_DIALECT_QEC_OPS
 
 include "cudaq/Optimizer/Dialect/QEC/QECDialect.td"
+include "cudaq/Optimizer/Dialect/Quake/QuakeTypes.td"
 include "mlir/IR/OpBase.td"
 
 class QECOp<string mnemonic, list<Trait> traits = []>
     : Op<QECDialect, mnemonic, traits>;
 
-// TODO: constrain operand types from AnyType to !quake.measure /
-// cc.stdvec<!quake.measure> once the prototype stabilizes. AnyType is
-// acceptable during prototyping but weakens IR verification. See #gap-9.
+// Operand type for detector/observable: either a single !quake.measure
+// or a collection !quake.measurements<?>. These are the native Quake types
+// produced by quake.mz -- using them here (instead of cc.stdvec) means
+// QEC ops live at the Quake abstraction level and don't depend on CC
+// lowering having run first. !quake.measurements<?> is the IR-level
+// representation of cudaq::measure_vector.
+def QEC_MeasureOrMeasurements : AnyTypeOf<[
+  MeasureType,
+  MeasurementsType
+]>;
 
 def QEC_DetectorOp : QECOp<"detector"> {
   let summary = "Declare a detector over measurement results.";
@@ -25,11 +33,11 @@ def QEC_DetectorOp : QECOp<"detector"> {
     Declares a parity constraint over one or more measurement results.
     Under noise-free execution the XOR of the referenced measurements
     is deterministic. Operands may be individual `!quake.measure` values
-    or a `cc.stdvec<!quake.measure>`. This operation has no side effects
-    and can be erased for backends that do not support it.
+    or a `!quake.measurements<?>` collection. This operation has no side
+    effects and can be erased for backends that do not support it.
   }];
   let arguments = (ins
-    Variadic<AnyType>:$measurements
+    Variadic<QEC_MeasureOrMeasurements>:$measurements
   );
   let results = (outs);
   let assemblyFormat = [{
@@ -40,12 +48,13 @@ def QEC_DetectorOp : QECOp<"detector"> {
 def QEC_DetectorsVectorizedOp : QECOp<"detectors_vectorized"> {
   let summary = "Declare N detectors by pairing prev and curr measurement vectors.";
   let description = [{
-    Given two vectors of measurement results, declares N detectors where
-    detector i is the parity of prev[i] and curr[i].
+    Given two collections of measurement results, declares N detectors where
+    detector i is the parity of prev[i] and curr[i]. Both operands must be
+    `!quake.measurements<N>` with matching sizes.
   }];
   let arguments = (ins
-    AnyType:$prev,
-    AnyType:$curr
+    MeasurementsType:$prev,
+    MeasurementsType:$curr
   );
   let results = (outs);
   let assemblyFormat = [{
@@ -58,10 +67,10 @@ def QEC_LogicalObservableOp : QECOp<"logical_observable"> {
   let description = [{
     Declares a logical observable as a binary sum of measurement results.
     Operands may be individual `!quake.measure` values or a
-    `cc.stdvec<!quake.measure>`.
+    `!quake.measurements<?>` collection.
   }];
   let arguments = (ins
-    Variadic<AnyType>:$measurements,
+    Variadic<QEC_MeasureOrMeasurements>:$measurements,
     DefaultValuedOptionalAttr<I64Attr, "0">:$observableIndex
   );
   let results = (outs);
