@@ -8,16 +8,6 @@
 
 #pragma once
 
-#include "mlir/CAPI/Registration.h"
+#include "mlir/IR/Dialect.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-MLIR_DECLARE_CAPI_DIALECT_REGISTRATION(Quake, quake);
-MLIR_DECLARE_CAPI_DIALECT_REGISTRATION(CC, cc);
-MLIR_DECLARE_CAPI_DIALECT_REGISTRATION(QEC, qec);
-
-#ifdef __cplusplus
-}
-#endif
+#include "cudaq/Optimizer/Dialect/QEC/QECDialect.h.inc"

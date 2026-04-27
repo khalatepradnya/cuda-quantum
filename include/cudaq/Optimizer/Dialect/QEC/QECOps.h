@@ -8,16 +8,11 @@
 
 #pragma once
 
-#include "mlir/CAPI/Registration.h"
+#include "cudaq/Optimizer/Dialect/CC/CCTypes.h"
+#include "cudaq/Optimizer/Dialect/QEC/QECDialect.h"
+#include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/OpDefinition.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-MLIR_DECLARE_CAPI_DIALECT_REGISTRATION(Quake, quake);
-MLIR_DECLARE_CAPI_DIALECT_REGISTRATION(CC, cc);
-MLIR_DECLARE_CAPI_DIALECT_REGISTRATION(QEC, qec);
-
-#ifdef __cplusplus
-}
-#endif
+#define GET_OP_CLASSES
+#include "cudaq/Optimizer/Dialect/QEC/QECOps.h.inc"

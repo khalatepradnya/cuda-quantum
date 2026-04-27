@@ -1,4 +1,4 @@
-/****************************************************************-*- C++ -*-****
+/*******************************************************************************
  * Copyright (c) 2022 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
@@ -6,18 +6,16 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-#pragma once
+#include "cudaq/Optimizer/Dialect/QEC/QECDialect.h"
+#include "cudaq/Optimizer/Dialect/QEC/QECOps.h"
 
-#include "mlir/CAPI/Registration.h"
+using namespace mlir;
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include "cudaq/Optimizer/Dialect/QEC/QECDialect.cpp.inc"
 
-MLIR_DECLARE_CAPI_DIALECT_REGISTRATION(Quake, quake);
-MLIR_DECLARE_CAPI_DIALECT_REGISTRATION(CC, cc);
-MLIR_DECLARE_CAPI_DIALECT_REGISTRATION(QEC, qec);
-
-#ifdef __cplusplus
+void qec::QECDialect::initialize() {
+  addOperations<
+#define GET_OP_LIST
+#include "cudaq/Optimizer/Dialect/QEC/QECOps.cpp.inc"
+      >();
 }
-#endif

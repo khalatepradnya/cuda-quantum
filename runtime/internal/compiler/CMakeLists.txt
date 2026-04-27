@@ -36,6 +36,7 @@ target_link_libraries(cudaq-mlir-runtime
     cudaq-mlir-runtime-headers
   PRIVATE
     CCDialect
+    QECDialect
     QuakeDialect
     OptCodeGen
     OptTransforms

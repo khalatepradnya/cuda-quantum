@@ -8,7 +8,9 @@
 
 #include "cudaq/Optimizer/CAPI/Dialects.h"
 #include "cudaq/Optimizer/Dialect/CC/CCDialect.h"
+#include "cudaq/Optimizer/Dialect/QEC/QECDialect.h"
 #include "cudaq/Optimizer/Dialect/Quake/QuakeDialect.h"
 
 MLIR_DEFINE_CAPI_DIALECT_REGISTRATION(Quake, quake, quake::QuakeDialect)
 MLIR_DEFINE_CAPI_DIALECT_REGISTRATION(CC, cc, cudaq::cc::CCDialect)
+MLIR_DEFINE_CAPI_DIALECT_REGISTRATION(QEC, qec, qec::QECDialect)
