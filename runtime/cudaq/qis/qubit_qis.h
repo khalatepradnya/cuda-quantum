@@ -12,6 +12,7 @@
 #include "cudaq/host_config.h"
 #include "cudaq/operators.h"
 #include "cudaq/platform.h"
+#include "cudaq/qis/measure_handle.h"
 #include "cudaq/qis/modifiers.h"
 #include "cudaq/qis/pauli_word.h"
 #include "cudaq/qis/qarray.h"
@@ -19,6 +20,7 @@
 #include "cudaq/qis/qreg.h"
 #include "cudaq/qis/qvector.h"
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 
@@ -420,6 +422,20 @@ void exp_pauli(QuantumRegister &ctrls, double theta, const char *pauliWord,
                                false, spin_op::from_word(pauliWord));
 }
 
+inline void reset(qubit &q) {
+  getExecutionManager()->reset({q.n_levels(), q.id()});
+}
+
+// Measurement primitives.
+//
+// Library-mode and MLIR-compiler mode have intentionally different `mz` /
+// `my` / `mx` signatures. The MLIR-mode API returns `cudaq::measure_handle` (or
+// `std::vector<measure_handle>`) and the AST bridge intercepts every call
+// inside `__qpu__` regions; `measure_handle` is not supported in library mode,
+// so library mode keeps the legacy `measure_result`-returning API unchanged.
+
+#ifdef CUDAQ_LIBRARY_MODE
+
 /// @brief Measure an individual qubit, return 0,1 as `bool`
 inline measure_result mz(qubit &q) {
   return getExecutionManager()->measure(QuditInfo{q.n_levels(), q.id()});
@@ -431,15 +447,11 @@ inline measure_result mx(qubit &q) {
   return getExecutionManager()->measure(QuditInfo{q.n_levels(), q.id()});
 }
 
-// Measure an individual qubit in `y` basis, return 0,1 as `bool`
+/// @brief Measure an individual qubit in `y` basis, return 0,1 as `bool`
 inline measure_result my(qubit &q) {
   r1(-M_PI_2, q);
   h(q);
   return getExecutionManager()->measure(QuditInfo{q.n_levels(), q.id()});
-}
-
-inline void reset(qubit &q) {
-  getExecutionManager()->reset({q.n_levels(), q.id()});
 }
 
 // Measure all qubits in the range, return vector of 0,1
@@ -490,6 +502,100 @@ std::vector<measure_result> mz(qubit &q, Qs &&...qs) {
   return result;
 }
 
+#else // !CUDAQ_LIBRARY_MODE -- spec applies, AST bridge intercepts.
+
+// The bodies exist only so
+// that name lookup succeeds before bridge interception runs; reaching one
+// at runtime means a host caller bypassed the kernel boundary, which
+// `std::abort()` traps loudly per the spec's `__qpu__`-only rule.
+
+/// @brief Measure an individual qubit in the Z basis.
+inline measure_handle mz(qubit &q) { std::abort(); }
+
+/// @brief Measure an individual qubit in the X basis.
+inline measure_handle mx(qubit &q) { std::abort(); }
+
+/// @brief Measure an individual qubit in the Y basis.
+inline measure_handle my(qubit &q) { std::abort(); }
+
+// Range overloads
+template <typename QubitRange>
+  requires std::ranges::range<QubitRange>
+std::vector<measure_handle> mz(QubitRange &q) {
+  std::abort();
+}
+
+template <std::size_t Levels>
+std::vector<measure_handle> mz(const qview<Levels> &q) {
+  std::abort();
+}
+
+template <typename... Qs>
+std::vector<measure_handle> mz(qubit &q, Qs &&...qs);
+
+template <typename QubitRange, typename... Qs>
+  requires(std::ranges::range<QubitRange>)
+std::vector<measure_handle> mz(QubitRange &qr, Qs &&...qs) {
+  std::abort();
+}
+
+template <typename... Qs>
+std::vector<measure_handle> mz(qubit &q, Qs &&...qs) {
+  std::abort();
+}
+
+template <typename QubitRange>
+  requires std::ranges::range<QubitRange>
+std::vector<measure_handle> mx(QubitRange &q) {
+  std::abort();
+}
+
+template <std::size_t Levels>
+std::vector<measure_handle> mx(const qview<Levels> &q) {
+  std::abort();
+}
+
+template <typename... Qs>
+std::vector<measure_handle> mx(qubit &q, Qs &&...qs);
+
+template <typename QubitRange, typename... Qs>
+  requires(std::ranges::range<QubitRange>)
+std::vector<measure_handle> mx(QubitRange &qr, Qs &&...qs) {
+  std::abort();
+}
+
+template <typename... Qs>
+std::vector<measure_handle> mx(qubit &q, Qs &&...qs) {
+  std::abort();
+}
+
+template <typename QubitRange>
+  requires std::ranges::range<QubitRange>
+std::vector<measure_handle> my(QubitRange &q) {
+  std::abort();
+}
+
+template <std::size_t Levels>
+std::vector<measure_handle> my(const qview<Levels> &q) {
+  std::abort();
+}
+
+template <typename... Qs>
+std::vector<measure_handle> my(qubit &q, Qs &&...qs);
+
+template <typename QubitRange, typename... Qs>
+  requires(std::ranges::range<QubitRange>)
+std::vector<measure_handle> my(QubitRange &qr, Qs &&...qs) {
+  std::abort();
+}
+
+template <typename... Qs>
+std::vector<measure_handle> my(qubit &q, Qs &&...qs) {
+  std::abort();
+}
+
+#endif // CUDAQ_LIBRARY_MODE
+
 namespace support {
 // Helpers to deal with the `vector<bool>` specialized template type.
 extern "C" {
@@ -518,11 +624,41 @@ inline std::int64_t to_integer(const std::vector<measure_result> &bits) {
   return ret;
 }
 
+#ifdef CUDAQ_LIBRARY_MODE
+// Library-mode `measure_result` is a class type, so this `vector<bool>`
+// overload is a genuinely distinct signature.
+inline std::int64_t to_integer(const std::vector<bool> &bits) {
+  std::int64_t ret = 0;
+  for (std::size_t i = 0; i < bits.size(); i++) {
+    if (bits[i]) {
+      ret |= 1UL << i;
+    }
+  }
+  return ret;
+}
+#endif
+
 inline std::int64_t to_integer(const std::string &arg) {
   std::string bitString{arg};
   std::reverse(bitString.begin(), bitString.end());
   return std::stoull(bitString, nullptr, 2);
 }
+
+#ifndef CUDAQ_LIBRARY_MODE
+// Bulk discrimination of a handle vector. Users call `to_bools`
+// explicitly whenever a `std::vector<measure_handle>` must reach a
+// `std::vector<bool>` context. Element ordering is preserved.
+//
+// In MLIR-compiler mode the AST bridge intercepts this call and lowers it
+// to a vectorized `quake.discriminate` consuming
+// `!cc.stdvec<!cc.measure_handle>` and producing `!cc.stdvec<i1>`. The
+// inline body below runs in library mode only and walks the handle vector
+// through `operator bool()` one element at a time.
+inline std::vector<bool>
+to_bools(const std::vector<measure_handle> & /*handles*/) {
+  std::abort();
+}
+#endif // !CUDAQ_LIBRARY_MODE
 
 // This concept tests if `Kernel` is a `Callable` that takes the arguments,
 // `Args`, and returns `void`.

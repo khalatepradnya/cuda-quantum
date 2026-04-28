@@ -73,6 +73,18 @@ static bool hasAnyQubitTypes(FunctionType funcTy) {
   return false;
 }
 
+// Returns true if any input or result type of `funcTy` transitively contains
+// `!cc.measure_handle`.
+static bool hasMeasureHandleInSignature(FunctionType funcTy) {
+  for (auto ty : funcTy.getInputs())
+    if (cudaq::cc::containsMeasureHandle(ty))
+      return true;
+  for (auto ty : funcTy.getResults())
+    if (cudaq::cc::containsMeasureHandle(ty))
+      return true;
+  return false;
+}
+
 // Remove the Itanium mangling "_ZTS" prefix. This is to match the name returned
 // by `typeid(TYPE).name()`.
 static std::string
@@ -644,6 +656,12 @@ void ASTBridgeAction::ASTBridgeConsumer::HandleTranslationUnit(
               fdPair.second))) {
         // Flag func as an entry point to a quantum kernel.
         func->setAttr(entryPointAttrName, unitAttr);
+        if (hasMeasureHandleInSignature(func.getFunctionType())) {
+          cudaq::details::reportClangError(
+              fdPair.second, mangler,
+              "measure_handle cannot cross the host-device boundary; "
+              "entry-point kernels must discriminate first");
+        }
         // Generate a declaration for the CPU C++ function.
         addFunctionDecl(fdPair.second, visitor, func.getFunctionType(),
                         entryName, func.empty());
