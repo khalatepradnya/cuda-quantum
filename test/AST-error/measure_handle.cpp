@@ -72,3 +72,18 @@ struct BoundaryPairOfVectorParam {
     (void)p;
   }
 };
+
+// Free functions with measure_handle in their signature are device-only
+// helpers. They are not operator() overloads, so the bridge does not emit
+// a boundary error. GenKernelExecution skips them via hasLegalType.
+bool free_handle_param(const std::vector<cudaq::measure_handle> &v) __qpu__ {
+  bool acc = false;
+  for (auto h : v)
+    acc ^= h;
+  return acc;
+}
+
+cudaq::measure_handle free_handle_return() __qpu__ {
+  cudaq::qubit q;
+  return mz(q);
+}
