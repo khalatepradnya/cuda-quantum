@@ -19,6 +19,14 @@ static constexpr const char QIRMeasureBody[] = "__quantum__qis__mz__body";
 static constexpr const char QIRMeasure[] = "__quantum__qis__mz";
 static constexpr const char QIRMeasureToRegister[] =
     "__quantum__qis__mz__to__register";
+/// Handle-form measurement: returns the chronological measurement index as
+/// an `i64` instead of a bit-value-encoded `Result*`. The index aligns with
+/// the simulator's `rec[-N]` lookback math, so `qec.detector(handle)` lowers
+/// to a runtime call that references the matching `M` instruction in the
+/// recorded circuit. Used only when `quake.mz` produces a `!cc.measure_handle`
+/// SSA value in QIR full mode.
+static constexpr const char QIRMeasureHandleToRegister[] =
+    "__quantum__qis__mz_handle__to__register";
 static constexpr const char QIRResetBody[] = "__quantum__qis__reset__body";
 static constexpr const char QIRReset[] = "__quantum__qis__reset";
 
@@ -39,6 +47,21 @@ static constexpr const char QIRCustomOp[] = "__quantum__qis__custom_unitary";
 static constexpr const char QIRCustomAdjOp[] =
     "__quantum__qis__custom_unitary__adj";
 static constexpr const char QIRExpPauli[] = "__quantum__qis__exp_pauli";
+
+/// QEC runtime entry-point names. The QIR conversion lowers `qec.detector`,
+/// `qec.logical_observable`, and `qec.detectors_vectorized` into calls to
+/// these symbols. The QPU resolves measurement-handle identity at runtime,
+/// so the compiler only forwards opaque handles (and counts / observable
+/// indices) without inspecting them. Names are preserved across the prototype
+/// for ABI compatibility.
+static constexpr const char QIRDetectorFromResults[] =
+    "__quantum__qis__detector_from_results";
+static constexpr const char QIRLogicalObservableFromResults[] =
+    "__quantum__qis__logical_observable_from_results";
+static constexpr const char QIRDetectorFromArray[] =
+    "__quantum__qis__detector_from_array";
+static constexpr const char QIRDetectorsVectorizedFromArrays[] =
+    "__quantum__qis__detectors_vectorized_from_arrays";
 
 static constexpr const char NVQIRInvokeWithControlBits[] =
     "invokeWithControlQubits";
