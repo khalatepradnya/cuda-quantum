@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2022 - 2026 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2026 NVIDIA Corporation & Affiliates.                         *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -8,16 +8,6 @@
 
 #pragma once
 
-#include "mlir/CAPI/Registration.h"
+#include "mlir/IR/Dialect.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-MLIR_DECLARE_CAPI_DIALECT_REGISTRATION(Quake, quake);
-MLIR_DECLARE_CAPI_DIALECT_REGISTRATION(QEC, qec);
-MLIR_DECLARE_CAPI_DIALECT_REGISTRATION(CC, cc);
-
-#ifdef __cplusplus
-}
-#endif
+#include "cudaq/Optimizer/Dialect/QEC/QECDialect.h.inc"
