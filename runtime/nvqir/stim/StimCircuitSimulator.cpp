@@ -63,6 +63,12 @@ protected:
   /// for speed)
   bool is_msm_mode = false;
 
+  /// @brief Accumulated Stim circuit covering gates, measurements, noise,
+  /// detectors, and observables. Survives `deallocateStateImpl` so that
+  /// host code can read it back via the `__nvqir__getCircuitRepr` backdoor
+  /// after a `cudaq::sample` call returns. Not part of any public API.
+  stim::Circuit recordedCircuit;
+
   std::optional<StimNoiseType>
   isValidStimNoiseChannel(const kraus_channel &channel) const {
 
@@ -271,9 +277,13 @@ protected:
     msm_err_count = 0;
     msm_id_counter = 0;
     is_msm_mode = false;
+    // Note: `recordedCircuit` is intentionally not cleared here. Host code
+    // reads it back through `__nvqir__getCircuitRepr` after `cudaq::sample`
+    // returns, by which time `deallocateStateImpl` has already run.
   }
 
-  /// @brief Apply operation to all Stim simulators.
+  /// @brief Apply operation to all Stim simulators and append it to the
+  /// persistent circuit log used by `getCircuitRepr`.
   void applyOpToSims(const std::string &gate_name,
                      const std::vector<uint32_t> &targets) {
     if (targets.empty())
@@ -283,6 +293,7 @@ protected:
     tempCircuit.safe_append_u(gate_name, targets);
     tableau->safe_do_circuit(tempCircuit);
     sampleSim->safe_do_circuit(tempCircuit);
+    recordedCircuit.safe_append_u(gate_name, targets);
   }
 
   /// @brief Apply the noise channel on \p qubits
@@ -385,6 +396,8 @@ protected:
         // Only apply the noise operations to the sample simulator (not the
         // Tableau simulator).
         sampleSim->safe_do_circuit(noiseOps);
+        recordedCircuit.safe_append_u(res.value().stim_name, qubits,
+                                      channel.parameters);
 
         // Increment the error count by the number of mechanisms
         msm_err_count += res->params.size();
@@ -630,6 +643,109 @@ public:
     if (includeSequentialData)
       result.sequentialData = std::move(sequentialData);
     return result;
+  }
+
+  /// @brief Append a `DETECTOR` declaration over the given measurement
+  /// indices. Indices are absolute (chronological) positions into the
+  /// measurement record; the lookback is `num_measurements - index` and is
+  /// tagged with `stim::TARGET_RECORD_BIT` to form a Stim record reference.
+  ///
+  /// In `cudaq::sample` mode, measurements are deferred until the final
+  /// `applyOpToSims("M", ...)` call inside `sample()`, so detectors recorded
+  /// during kernel execution appear before their `M` instructions in
+  /// `recordedCircuit`. `stim::Circuit::detector_error_model` rejects that
+  /// ordering. This override is wired up for the test backdoor; production
+  /// DEM generation goes through the `D @ S` matrix path on
+  /// `ExecutionContext`.
+  /// @brief Commit any pending `sampleQubits` as `M` ops in `recordedCircuit`
+  /// so subsequent `DETECTOR rec[-N]` / `OBSERVABLE_INCLUDE rec[-N]`
+  /// instructions can reference them. Required because in `cudaq::sample` +
+  /// `explicitMeasurements` mode `mz()` defers the `M` op to flush time;
+  /// without this nudge, `qec.detector(handle)` immediately following a
+  /// scattered `mz` (e.g., the final data-qubit readouts before
+  /// `cudaq::logical_observable`) would emit a `rec[-N]` referencing an `M`
+  /// that hasn't been laid down yet.
+  void flushPendingSampleMeasurements() {
+    if (!sampleQubits.empty())
+      flushAnySamplingTasks(/*force=*/false);
+  }
+
+  void detector(const std::int64_t *indices, std::size_t count) override {
+    flushPendingSampleMeasurements();
+    std::vector<uint32_t> targets;
+    targets.reserve(count);
+    for (std::size_t i = 0; i < count; i++) {
+      auto uid = indices[i];
+      if (uid < 0 || static_cast<std::size_t>(uid) >= num_measurements) {
+        CUDAQ_INFO("detector: skipping out-of-range measurement index {} "
+                   "(num_measurements={})",
+                   uid, num_measurements);
+        continue;
+      }
+      auto lookback = static_cast<uint32_t>(num_measurements -
+                                            static_cast<std::size_t>(uid));
+      targets.push_back(lookback | stim::TARGET_RECORD_BIT);
+    }
+    if (!targets.empty())
+      recordedCircuit.safe_append_u("DETECTOR", targets);
+  }
+
+  void detectors_vectorized(const std::int64_t *prev, const std::int64_t *curr,
+                            std::size_t count) override {
+    for (std::size_t i = 0; i < count; i++) {
+      const std::int64_t pair[2] = {prev[i], curr[i]};
+      detector(pair, 2);
+    }
+  }
+
+  void logical_observable(const std::int64_t *indices, std::size_t count,
+                          std::size_t observable_index = 0) override {
+    flushPendingSampleMeasurements();
+    std::vector<uint32_t> targets;
+    targets.reserve(count);
+    for (std::size_t i = 0; i < count; i++) {
+      auto uid = indices[i];
+      if (uid < 0 || static_cast<std::size_t>(uid) >= num_measurements)
+        continue;
+      auto lookback = static_cast<uint32_t>(num_measurements -
+                                            static_cast<std::size_t>(uid));
+      targets.push_back(lookback | stim::TARGET_RECORD_BIT);
+    }
+    if (!targets.empty())
+      recordedCircuit.safe_append_ua("OBSERVABLE_INCLUDE", targets,
+                                     static_cast<double>(observable_index));
+  }
+
+  /// @brief Predict the chronological index that the just-issued `mz` will
+  /// receive in `recordedCircuit`.
+  ///
+  /// In `cudaq::sample` mode with `explicitMeasurements`, `mz()` does not
+  /// commit an `M` op or bump `num_measurements`; it pushes the qubit onto
+  /// `sampleQubits` and the actual measurement is emitted later by
+  /// `flushAnySamplingTasks()` (triggered by the next `reset` or the final
+  /// flush in `finalizeExecutionContext`). So at the moment
+  /// `__quantum__qis__mz_handle__to__register` queries us, the just-issued
+  /// measurement is the *last* entry of `sampleQubits`, and its eventual
+  /// chronological index is `num_measurements + sampleQubits.size() - 1`.
+  /// In direct/no-sample mode `measureQubit` runs synchronously and bumps
+  /// `num_measurements` immediately, so `sampleQubits` is empty and the
+  /// just-performed measurement sits at `num_measurements - 1`.
+  std::int64_t getMeasureIndex() const override {
+    auto pending = static_cast<std::int64_t>(sampleQubits.size());
+    auto committed = static_cast<std::int64_t>(num_measurements);
+    auto total = committed + pending;
+    if (total == 0)
+      return -1;
+    return total - 1;
+  }
+
+  /// @brief Test/debug backdoor: render `recordedCircuit` as a Stim-format
+  /// string. Reachable from host code via `__nvqir__getCircuitRepr`. See the
+  /// `detector` override for the timing caveat.
+  std::string getCircuitRepr() const override {
+    std::stringstream ss;
+    ss << recordedCircuit;
+    return ss.str();
   }
 
   bool isStateVectorSimulator() const override { return false; }

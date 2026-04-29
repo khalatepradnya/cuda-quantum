@@ -594,6 +594,61 @@ std::vector<measure_handle> my(qubit &q, Qs &&...qs) {
   std::abort();
 }
 
+// QEC detector and observable declarations.
+//
+// Like `mz`/`mx`/`my`, these are MLIR-mode-only and operate on
+// `measure_handle`. The AST bridge intercepts every call inside `__qpu__`
+// regions and lowers it to the corresponding `qec.*` MLIR op, so the inline
+// bodies are never reached at runtime. They trap with `std::abort()` to
+// mirror the `mz`/`mx`/`my` discipline: host code that bypasses the kernel
+// boundary fails loudly instead of producing wrong results.
+//
+// The runtime ABI lives in `runtime/nvqir/NVQIR.cpp` as
+// `__quantum__qis__{detector,logical_observable}_from_results` and
+// `__quantum__qis__detectors_vectorized_from_arrays`, taking opaque
+// `Result**` arrays. We do not declare those here because user code never
+// calls them directly; the QIR conversion in `ConvertToQIRAPI.cpp` is the
+// only producer of those calls.
+
+/// Declare a detector over one or more measurement results.
+/// A detector is a parity constraint: under noise-free execution the XOR of
+/// the referenced measurements is deterministic.
+template <typename... MeasArgs>
+void detector(MeasArgs &...ms) {
+  static_assert((std::is_same_v<measure_handle, MeasArgs> && ...),
+                "detector() arguments must all be cudaq::measure_handle");
+  std::abort();
+}
+
+/// Declare a detector from a measurement collection.
+inline void detector(const std::vector<measure_handle> &ms) { std::abort(); }
+
+/// Declare N detectors by pairing two measurement collections element-wise.
+/// This is the standard form for cross-round detectors.
+inline void detectors_vectorized(const std::vector<measure_handle> &prev,
+                                 const std::vector<measure_handle> &curr) {
+  std::abort();
+}
+
+/// Declare a logical observable over one or more measurement results.
+/// Uses `observable_index = 0` by default. For codes with multiple logical
+/// qubits, use the vector overload with an explicit index.
+template <typename... MeasArgs>
+void logical_observable(MeasArgs &...ms) {
+  static_assert(
+      (std::is_same_v<measure_handle, MeasArgs> && ...),
+      "logical_observable() arguments must all be cudaq::measure_handle");
+  std::abort();
+}
+
+/// Declare a logical observable from a measurement collection.
+/// @param observable_index  Index of this logical observable (0-based). Codes
+///   with k logical qubits should declare observables 0..k-1.
+inline void logical_observable(const std::vector<measure_handle> &ms,
+                               std::size_t observable_index = 0) {
+  std::abort();
+}
+
 #endif // CUDAQ_LIBRARY_MODE
 
 namespace support {

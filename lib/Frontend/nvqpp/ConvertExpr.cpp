@@ -11,6 +11,7 @@
 #include "cudaq/Optimizer/Builder/Factory.h"
 #include "cudaq/Optimizer/Builder/Intrinsics.h"
 #include "cudaq/Optimizer/Dialect/CC/CCOps.h"
+#include "cudaq/Optimizer/Dialect/QEC/QECOps.h"
 #include "cudaq/Optimizer/Dialect/Quake/QuakeOps.h"
 #include "llvm/Support/Debug.h"
 
@@ -2345,6 +2346,88 @@ bool QuakeBridgeVisitor::VisitCallExpr(clang::CallExpr *x) {
       if (devFuncTy.getResults().empty())
         return true;
       return pushValue(devCall.getResult(0));
+    }
+
+    // QEC intercepts: lower `cudaq::detector` / `cudaq::logical_observable` /
+    // `cudaq::detectors_vectorized` directly to QEC dialect ops on
+    // `!cc.measure_handle` (or `!cc.stdvec<!cc.measure_handle>`).
+    //
+    // The C++ signatures take the measurement operands by reference
+    // (`MeasArgs &...ms`, `const std::vector<measure_handle> &`), so the
+    // AST bridge delivers `!cc.ptr<!cc.measure_handle>` /
+    // `!cc.ptr<!cc.stdvec<!cc.measure_handle>>` here. Insert `cc.load` to
+    // recover the value before constructing the QEC op, mirroring the
+    // pattern in `cudaq::measure_handle::operator bool()` (~L680).
+    auto loadIfPtr = [&](Value v) -> Value {
+      if (auto pt = dyn_cast<cudaq::cc::PointerType>(v.getType()))
+        if (isa<cudaq::cc::MeasureHandleType, cudaq::cc::StdvecType>(
+                pt.getElementType()))
+          return builder.create<cudaq::cc::LoadOp>(loc, v);
+      return v;
+    };
+    auto isMeasureHandleOrVec = [](Type ty) {
+      if (isa<cudaq::cc::MeasureHandleType>(ty))
+        return true;
+      if (auto sv = dyn_cast<cudaq::cc::StdvecType>(ty))
+        return isa<cudaq::cc::MeasureHandleType>(sv.getElementType());
+      return false;
+    };
+    if (funcName == "detector") {
+      SmallVector<Value> ops;
+      ops.reserve(args.size());
+      for (auto arg : args) {
+        Value v = loadIfPtr(arg);
+        if (!isMeasureHandleOrVec(v.getType()))
+          reportClangError(x, mangler,
+                           "detector argument must be a cudaq::measure_handle "
+                           "or std::vector<cudaq::measure_handle>");
+        ops.push_back(v);
+      }
+      builder.create<qec::DetectorOp>(loc, ops);
+      return true;
+    }
+    if (funcName == "logical_observable") {
+      // The vector overload has signature (measurements, observable_index).
+      // The variadic template overload has only measure args (index = 0).
+      // Detect a trailing integer arg so codes with k>1 logical qubits can
+      // declare distinct observables in compiled mode.
+      SmallVector<Value> measArgs(args);
+      std::int64_t obsIdx = 0;
+      if (!measArgs.empty() && measArgs.back().getType().isIntOrIndex()) {
+        if (auto cst = measArgs.back().getDefiningOp<arith::ConstantIntOp>())
+          obsIdx = cst.value();
+        measArgs.pop_back();
+      }
+      SmallVector<Value> ops;
+      ops.reserve(measArgs.size());
+      for (auto arg : measArgs) {
+        Value v = loadIfPtr(arg);
+        if (!isMeasureHandleOrVec(v.getType()))
+          reportClangError(
+              x, mangler,
+              "logical_observable argument must be a cudaq::measure_handle "
+              "or std::vector<cudaq::measure_handle>");
+        ops.push_back(v);
+      }
+      builder.create<qec::LogicalObservableOp>(
+          loc, ops, builder.getI64IntegerAttr(obsIdx));
+      return true;
+    }
+    if (funcName == "detectors_vectorized" && args.size() == 2) {
+      // Both args are required to be `!cc.stdvec<!cc.measure_handle>`; reject
+      // anything else with a clang diagnostic at the call site rather than
+      // letting a malformed op fall through to the QEC op verifier.
+      Value prev = loadIfPtr(args[0]);
+      Value curr = loadIfPtr(args[1]);
+      for (auto arg : {prev, curr}) {
+        auto sv = dyn_cast<cudaq::cc::StdvecType>(arg.getType());
+        if (!sv || !isa<cudaq::cc::MeasureHandleType>(sv.getElementType()))
+          reportClangError(x, mangler,
+                           "detectors_vectorized arguments must each be a "
+                           "std::vector<cudaq::measure_handle>");
+      }
+      builder.create<qec::DetectorsVectorizedOp>(loc, prev, curr);
+      return true;
     }
 
     // Finally, flag the call as an error except anything in cudaq::solvers or

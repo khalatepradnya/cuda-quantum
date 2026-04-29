@@ -737,6 +737,24 @@ Result *__quantum__qis__mz__to__register(Qubit *q, const char *name) {
   return b ? ResultOne : ResultZero;
 }
 
+// Handle-form measurement variant. The standard `mz__to__register` path
+// returns `ResultOne`/`ResultZero` (bit-value-encoded sentinels), which is
+// useless as a measurement identity for QEC: every measurement that yields
+// 1 hashes to the same `Result*`. The kernel-level `measure_handle` needs
+// to carry the chronological index assigned by the simulator so that
+// `qec.detector(handle)` lines up with the matching `M` instruction in
+// `recordedCircuit` (and Stim's `rec[-N]` lookback math). Asking the
+// simulator for `getMeasureIndex()` post-measurement gives us exactly that
+// number.
+std::int64_t __quantum__qis__mz_handle__to__register(Qubit *q,
+                                                     const char *name) {
+  std::string regName(name);
+  auto qI = qubitToSizeT(q);
+  ScopedTraceWithContext("NVQIR::mz_handle", qI, regName);
+  nvqir::getCircuitSimulatorInternal()->mz(qI, regName);
+  return nvqir::getCircuitSimulatorInternal()->getMeasureIndex();
+}
+
 void __quantum__qis__exp_pauli(double theta, Array *qubits, char *pauliWord) {
   struct CLikeString {
     char *ptr = nullptr;
@@ -806,6 +824,70 @@ void __quantum__qis__trap(std::int64_t code) {
   } else {
     CUDAQ_ERROR("code generation failure for target");
   }
+}
+
+// QEC declarations lowered from the `quake.qec` dialect.
+//
+// The compiler lowers `quake.qec.{detector,logical_observable,
+// detectors_vectorized}` to calls into these functions, passing measurement
+// handles as `Result**` arrays in the QIR ABI. In compiled QIR, each `Result*`
+// is `inttoptr(measurement_index)`, so `reinterpret_cast<std::intptr_t>` round-
+// trips it to the chronological index assigned at QIR generation time. The
+// runtime forwards integer indices to the simulator's QEC virtuals; backends
+// that do not implement QEC (default no-op) silently drop the declarations.
+static inline std::int64_t resultPtrToMeasureIndex(Result *r) {
+  return static_cast<std::int64_t>(reinterpret_cast<std::intptr_t>(r));
+}
+
+static std::vector<std::int64_t> resultArrayToIndices(Result **results,
+                                                      std::int64_t count) {
+  std::vector<std::int64_t> indices;
+  indices.reserve(count);
+  for (std::int64_t i = 0; i < count; i++)
+    indices.push_back(resultPtrToMeasureIndex(results[i]));
+  return indices;
+}
+
+void __quantum__qis__detector_from_results(Result **results,
+                                           std::int64_t count) {
+  auto indices = resultArrayToIndices(results, count);
+  nvqir::getCircuitSimulatorInternal()->detector(indices.data(),
+                                                 indices.size());
+}
+
+void __quantum__qis__detectors_vectorized_from_arrays(Result **prev_results,
+                                                      std::int64_t prev_count,
+                                                      Result **curr_results,
+                                                      std::int64_t curr_count) {
+  // The QIR conversion pattern delivers the prev/curr arrays as separate
+  // (data, size) pairs because `cc.stdvec` carries no static size. Length
+  // agreement is enforced here at the simulator boundary.
+  if (prev_count != curr_count)
+    return;
+  auto prev = resultArrayToIndices(prev_results, prev_count);
+  auto curr = resultArrayToIndices(curr_results, curr_count);
+  nvqir::getCircuitSimulatorInternal()->detectors_vectorized(
+      prev.data(), curr.data(), prev.size());
+}
+
+void __quantum__qis__logical_observable_from_results(
+    Result **results, std::int64_t count, std::int64_t observable_index) {
+  auto indices = resultArrayToIndices(results, count);
+  nvqir::getCircuitSimulatorInternal()->logical_observable(
+      indices.data(), indices.size(),
+      static_cast<std::size_t>(observable_index));
+}
+
+// Test/debug backdoor: expose the simulator's recorded circuit as a C string.
+// `getCircuitRepr` returns `std::string` so it cannot cross the extern "C"
+// boundary directly; a thread-local buffer holds the value until the next
+// call. Only the Stim backend produces a non-empty string today.
+static thread_local std::string __nvqir_circuit_repr_buffer;
+
+const char *__nvqir__getCircuitRepr() {
+  __nvqir_circuit_repr_buffer =
+      nvqir::getCircuitSimulatorInternal()->getCircuitRepr();
+  return __nvqir_circuit_repr_buffer.c_str();
 }
 
 void __quantum__qis__apply_kraus_channel_double(std::int64_t krausChannelKey,

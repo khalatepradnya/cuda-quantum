@@ -416,6 +416,40 @@ public:
   sample(const std::vector<std::size_t> &qubitIdxs, const int shots,
          bool includeSequentialData = true) = 0;
 
+  /// @brief Return a string representation of the recorded circuit, including
+  /// gates, measurements, noise, detectors, and observables. Only meaningful
+  /// for backends that record circuits (e.g., Stim). Internal/test backdoor
+  /// reachable via the extern "C" `__nvqir__getCircuitRepr` function; not part
+  /// of the public CUDA-Q API.
+  virtual std::string getCircuitRepr() const { return ""; }
+
+  /// @brief Return the chronological index of the most recent measurement.
+  /// Used by the handle-form `mz` runtime path to populate the kernel-level
+  /// `measure_handle` value with an index that aligns with the simulator's
+  /// `rec[-N]` lookback math (so `qec.detector(handle)` references the
+  /// matching `M` instruction in the recorded circuit). Returns -1 when no
+  /// measurement has been performed; backends that don't track an absolute
+  /// measurement count must override.
+  virtual std::int64_t getMeasureIndex() const { return -1; }
+
+  /// @brief Declare a detector over one or more measurement results, addressed
+  /// by their absolute chronological measurement indices. Default no-op;
+  /// QEC-aware backends (e.g., Stim) override this. Indices are produced by
+  /// the runtime adapter from QIR `Result*` handles.
+  virtual void detector(const std::int64_t *indices, std::size_t count) {}
+
+  /// @brief Declare N detectors element-wise over two measurement-index
+  /// arrays of equal length (cross-round detectors).
+  virtual void detectors_vectorized(const std::int64_t *prev,
+                                    const std::int64_t *curr,
+                                    std::size_t count) {}
+
+  /// @brief Declare a logical observable over one or more measurement
+  /// indices, tagged with @p observable_index.
+  virtual void logical_observable(const std::int64_t *indices,
+                                  std::size_t count,
+                                  std::size_t observable_index = 0) {}
+
   /// @brief Return the name of this CircuitSimulator
   virtual std::string name() const = 0;
 
