@@ -118,3 +118,53 @@ func.func @indirect_handle(%c: !cc.indirect_callable<() -> !cc.measure_handle>)
 // CHECK-SAME:      %[[VAL_0:.*]]: !cc.indirect_callable<() -> i64>) -> i64
 // CHECK:           %[[VAL_1:.*]] = cc.call_indirect_callable %[[VAL_0]] : (!cc.indirect_callable<() -> i64>) -> i64
 // CHECK:           return %[[VAL_1]] : i64
+
+// -----
+// Pointer arithmetic, store, cast, and load on a static handle array. 
+
+func.func @handle_array_rw(%h: !cc.measure_handle, %i: i64) -> i1 attributes {"cudaq-entrypoint", "cudaq-kernel"} {
+  %0 = cc.alloca !cc.array<!cc.measure_handle x 4>
+  %1 = cc.compute_ptr %0[%i] : (!cc.ptr<!cc.array<!cc.measure_handle x 4>>, i64) -> !cc.ptr<!cc.measure_handle>
+  cc.store %h, %1 : !cc.ptr<!cc.measure_handle>
+  %2 = cc.cast %0 : (!cc.ptr<!cc.array<!cc.measure_handle x 4>>) -> !cc.ptr<!cc.measure_handle>
+  %3 = cc.load %2 : !cc.ptr<!cc.measure_handle>
+  %4 = quake.discriminate %3 : (!cc.measure_handle) -> i1
+  return %4 : i1
+}
+
+// CHECK-LABEL:   func.func @handle_array_rw(
+// CHECK-SAME:      %[[VAL_H:.*]]: i64, %[[VAL_I:.*]]: i64)
+// CHECK:           %[[VAL_BUF:.*]] = cc.alloca !cc.array<i64 x 4>
+// CHECK:           %[[VAL_PI:.*]] = cc.compute_ptr %[[VAL_BUF]]{{\[}}%[[VAL_I]]] : (!cc.ptr<!cc.array<i64 x 4>>, i64) -> !cc.ptr<i64>
+// CHECK:           cc.store %[[VAL_H]], %[[VAL_PI]] : !cc.ptr<i64>
+// CHECK:           %[[VAL_P0:.*]] = cc.cast %[[VAL_BUF]] : (!cc.ptr<!cc.array<i64 x 4>>) -> !cc.ptr<i64>
+// CHECK:           %[[VAL_LOAD:.*]] = cc.load %[[VAL_P0]] : !cc.ptr<i64>
+
+// -----
+// `cc.stdvec_init` + `cc.stdvec_data` + `cc.stdvec_size` over a handle buffer.
+
+func.func @handle_stdvec_init(%n: i64) -> !cc.stdvec<!cc.measure_handle> attributes {"cudaq-kernel"} {
+  %0 = cc.alloca !cc.measure_handle[%n : i64]
+  %1 = cc.stdvec_init %0, %n : (!cc.ptr<!cc.array<!cc.measure_handle x ?>>, i64) -> !cc.stdvec<!cc.measure_handle>
+  return %1 : !cc.stdvec<!cc.measure_handle>
+}
+
+// CHECK-LABEL:   func.func @handle_stdvec_init(
+// CHECK-SAME:      %[[VAL_N:.*]]: i64) -> !cc.stdvec<i64>
+// CHECK:           %[[VAL_BUF:.*]] = cc.alloca i64{{\[}}%[[VAL_N]] : i64]
+// CHECK:           %[[VAL_VEC:.*]] = cc.stdvec_init %[[VAL_BUF]], %[[VAL_N]] : (!cc.ptr<!cc.array<i64 x ?>>, i64) -> !cc.stdvec<i64>
+// CHECK:           return %[[VAL_VEC]] : !cc.stdvec<i64>
+
+func.func @handle_stdvec_consume(%v: !cc.stdvec<!cc.measure_handle>) -> i1 attributes {"cudaq-kernel"} {
+  %0 = cc.stdvec_data %v : (!cc.stdvec<!cc.measure_handle>) -> !cc.ptr<!cc.array<!cc.measure_handle x ?>>
+  %1 = cc.cast %0 : (!cc.ptr<!cc.array<!cc.measure_handle x ?>>) -> !cc.ptr<!cc.measure_handle>
+  %2 = cc.load %1 : !cc.ptr<!cc.measure_handle>
+  %3 = quake.discriminate %2 : (!cc.measure_handle) -> i1
+  return %3 : i1
+}
+
+// CHECK-LABEL:   func.func @handle_stdvec_consume(
+// CHECK-SAME:      %[[VAL_V:.*]]: !cc.stdvec<i64>) -> i1
+// CHECK:           %[[VAL_DATA:.*]] = cc.stdvec_data %[[VAL_V]] : (!cc.stdvec<i64>) -> !cc.ptr<!cc.array<i64 x ?>>
+// CHECK:           %[[VAL_PTR:.*]] = cc.cast %[[VAL_DATA]] : (!cc.ptr<!cc.array<i64 x ?>>) -> !cc.ptr<i64>
+// CHECK:           %[[VAL_LD:.*]] = cc.load %[[VAL_PTR]] : !cc.ptr<i64>
