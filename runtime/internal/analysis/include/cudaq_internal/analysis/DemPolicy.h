@@ -8,10 +8,10 @@
 
 /// @file DemPolicy.h
 /// @brief Light header defining the `dem_policy` tag and `DemData` result
-///        struct. Split out of `Dem.h` so that
-///        `cudaq/algorithms/policy_dispatch.h` (which is transitively included
-///        by every NVQIR simulator) can pull in the policy without dragging in
-///        `cudaq/platform.h` and the kernel builder.
+///        struct. Split out of `Dem.h` so that `cudaq/algorithms/policy_dispatch.h`
+///        (which is transitively included by every NVQIR simulator) can pull
+///        in the policy without dragging in `cudaq/platform.h` and the kernel
+///        builder.
 ///
 /// The full engine entry point (`computeDem`, `ScopedAnalysisSimulator`) lives
 /// in `Dem.h`, which includes this header.
@@ -20,14 +20,6 @@
 
 #include <cstddef>
 #include <string>
-
-namespace cudaq {
-class ExecutionContext;
-} // namespace cudaq
-
-namespace nvqir {
-class CircuitSimulator;
-} // namespace nvqir
 
 namespace cudaq_internal::analysis {
 
@@ -55,54 +47,34 @@ struct DemData {
 };
 
 // =============================================================================
-// dem_policy — tag + options for DEM analysis
+// dem_policy — tag for DEM analysis
 // =============================================================================
 
-namespace detail {
-
-/// @brief Thread-local destination for the DemData produced by the simulator's
-/// `finalize_simulation_circuit_impl(sim, dem_policy, ctx)` overload.
+/// @brief Tag struct for DEM analysis, registered in `policy_dispatch.h`.
 ///
-/// FIXME(runtime-team): The CPO dispatch in `policy_dispatch.h::withPolicy`
-/// constructs the policy via its default ctor inside the registry callback,
-/// so callers cannot attach a result destination to the policy instance the
-/// simulator sees. Until `withPolicy` accepts a caller-provided policy
-/// instance (or an equivalent mechanism such as
-/// `cudaq::policies::current_policy<P>()` lands), DEM uses this thread-local
-/// to ferry the result back to `computeDem`. Replace with policy-carried
-/// state once the policy infra grows.
-DemData *getResultSlot();
-void setResultSlot(DemData *slot);
-
-} // namespace detail
-
-/// @brief Tag + options for DEM analysis. Modeled on `cudaq::sample_policy`.
+/// Unlike `sample_policy` (which carries a hidden-friend
+/// `finalize_simulation_circuit_impl` overload that the CPO invokes during
+/// simulator finalization), `dem_policy` deliberately has NO custom finalize
+/// overload. The CPO's `has_sim_custom_finalize<dem_policy>` evaluates to
+/// `false`, so the simulator's `finalizeExecutionContext` falls through to the
+/// default no-op path for "other_policies".
 ///
-/// The hidden-friend `finalize_simulation_circuit_impl` overload is found via
-/// ADL through this struct's namespace (`cudaq_internal::analysis`). It is
-/// invoked by `nvqir::CircuitSimulator::finalizeExecutionContext` when the
-/// active execution context has `name == "dem"`.
-struct dem_policy {
-  /// @brief Conceptual result type for this policy. Semantically, dem_policy
-  ///        produces `DemData`. In the v1 implementation the friend overload
-  ///        returns `void` and writes to the thread-local result slot (see
-  ///        `detail::getResultSlot`) because the existing
-  ///        `finalize_simulation_circuit` visitor in
-  ///        `nvqir::CircuitSimulator::finalizeExecutionContext` only declares
-  ///        handlers for `sample_result` and `void_result`. Adding a third
-  ///        handler would couple every simulator's finalize visitor to the
-  ///        analysis module, which is exactly the kind of bloat the policy
-  ///        direction aims to avoid. See FIXME on `detail::getResultSlot`.
-  using result_type = DemData;
-
-  // Hidden friend: discovered via ADL through cudaq_internal::analysis.
-  // Returns void in v1; the result is written to detail::getResultSlot() and
-  // the caller (`runComputeDem`) reads it back. When the policy CPO grows a
-  // typed result channel that does not require per-type visitor handlers,
-  // change this signature to `DemData` and remove the TLS slot.
-  friend void finalize_simulation_circuit_impl(nvqir::CircuitSimulator &sim,
-                                               const dem_policy &policy,
-                                               cudaq::ExecutionContext &ctx);
-};
+/// DEM extraction happens *after* `with_execution_context` returns, in
+/// `runComputeDem` (Dem.cpp). The Stim simulator's `recordedCircuit` survives
+/// finalization (it is intentionally not cleared in `deallocateStateImpl`), so
+/// `getCircuitRepr()` remains valid at that point.
+///
+/// This design avoids the link-time coupling that a hidden-friend overload
+/// would create: every NVQIR simulator would need to link `libcudaq-analysis`
+/// just because the CPO concept check sees the friend declaration in this
+/// header (which is transitively included by every simulator via
+/// `policy_dispatch.h` → `CircuitSimulator.h`).
+///
+/// FIXME(runtime-team): when the policy CPO grows a mechanism for
+/// policy-specific finalization that does not require every simulator to
+/// resolve the symbol at link time (e.g., a virtual dispatch or a plugin
+/// registration point), revisit whether DEM extraction should move back into
+/// the finalize path.
+struct dem_policy {};
 
 } // namespace cudaq_internal::analysis

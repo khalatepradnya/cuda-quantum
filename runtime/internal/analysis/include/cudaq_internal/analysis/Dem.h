@@ -17,15 +17,13 @@
 ///
 /// Concepts:
 ///
-///   - `dem_policy`     Tag + options struct for DEM analysis. Mirrors the
-///                      shape of `cudaq::sample_policy` /
-///                      `cudaq::observe_policy` so dispatch through the
-///                      existing CPO infrastructure
-///                      (`policy_dispatch.h`, `policy_cpos.h`) works without
-///                      bespoke plumbing. Defined in `DemPolicy.h`.
+///   - `dem_policy`     Tag struct registered in `policy_dispatch.h` so
+///                      `withPolicy` recognizes `"dem"` as a valid context
+///                      name. Has no custom finalize overload — the CPO falls
+///                      through to the default no-op. Defined in `DemPolicy.h`.
 ///
-///   - `DemData`        Result type carried by `dem_policy::result_type`.
-///                      Defined in `DemPolicy.h`.
+///   - `DemData`        Result struct carrying the DEM text + detector /
+///                      observable counts. Defined in `DemPolicy.h`.
 ///
 ///   - `computeDem`     Templated entry point that drives a kernel through
 ///                      the DEM analysis path. Parallels `estimate_resources`
@@ -94,9 +92,10 @@ DemData runComputeDem(const std::string &kernelName,
 /// The kernel is executed through the Stim simulator (forced via
 /// `ScopedAnalysisSimulator`) under an `ExecutionContext` named "dem". The
 /// simulator records the circuit, including `DETECTOR` and
-/// `OBSERVABLE_INCLUDE` instructions emitted by the `qec.*` annotation ops,
-/// and the policy-typed `finalize_simulation_circuit_impl` overload converts
-/// it to a Stim DEM.
+/// `OBSERVABLE_INCLUDE` instructions emitted by the `qec.*` annotation ops.
+/// After `with_execution_context` returns, `runComputeDem` reads the
+/// recorded circuit back via `getCircuitRepr()` and runs Stim's
+/// `ErrorAnalyzer` to produce the DEM.
 ///
 /// @note The active target / platform is not modified. Stim is used as an
 ///       internal analysis engine, never as a user-facing target.
