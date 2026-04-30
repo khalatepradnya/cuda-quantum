@@ -13,6 +13,21 @@ set (CMAKE_CXX_FLAGS
 SET(CMAKE_EXE_LINKER_FLAGS "")
 SET(CMAKE_SHARED_LINKER_FLAGS "")
 
+# The unit-test executables in this tree are ordinary C++ binaries: they
+# link the CUDA-Q runtime and call `cudaq::sample(myKernel)` on host-side
+# `__qpu__` kernel functors directly, with no `nvq++` / `cudaq-quake` step
+# in between. That is the same execution model as library mode (the AST
+# bridge never runs, so measurement calls reach the inline `mz`/`mx`/`my`
+# bodies in `runtime/cudaq/qis/qubit_qis.h`), but the macro must be set
+# explicitly because the build system invokes `clang++` directly here.
+# Without it, the headers' MLIR-mode branches (`#ifndef CUDAQ_LIBRARY_MODE`)
+# emit the spec'd `std::abort()` stubs that fail loudly when the bridge
+# hasn't intercepted, and every measurement-using GTest aborts. Defining
+# the macro at directory scope routes every target below this point through
+# the legacy `measure_result`-returning bodies that work on host. This is
+# a temporary workaround until library mode itself is removed.
+add_compile_definitions(CUDAQ_LIBRARY_MODE)
+
 # ctest's PROCESSORS property tells the scheduler how many CPU slots each test
 # occupies. Without it, `ctest -j N` launches N OpenMP-parallel tests at once
 # (2N threads competing for N cores). This value is only applied to tests that
