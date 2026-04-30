@@ -9,7 +9,7 @@
 #pragma once
 
 #include "cudaq/algorithms/policies.h"
-#include "cudaq_internal/analysis/DemPolicy.h"
+#include "cudaq/analysis/DemPolicy.h"
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -89,7 +89,7 @@ void withPolicy(std::string_view name, Func &&func) {
   static const Entry registry[] = {
       {"sample", [](FuncRef f) { f(sample_policy{}); }},
       {"observe", [](FuncRef f) { f(observe_policy{}); }},
-      {"dem", [](FuncRef f) { f(cudaq_internal::analysis::dem_policy{}); }},
+      {"dem", [](FuncRef f) { f(cudaq::analysis::dem_policy{}); }},
   };
 
   for (auto &[key, dispatch] : registry) {

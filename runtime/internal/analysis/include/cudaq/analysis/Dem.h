@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2022 - 2026 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2026 NVIDIA Corporation & Affiliates.                         *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -10,10 +10,10 @@
 /// @brief Internal Public Module API for the DEM (Detector Error Model)
 /// analysis engine.
 ///
-/// This header is part of the `cudaq_internal::analysis` module per
-/// `CppAPICodingStyle.md` §3.2 (Internal Public Module APIs). It is meant to
-/// be consumed by CUDA-QX's `cudaq::qec::dem_from_kernel(...)` user-facing
-/// wrapper, not by end users directly.
+/// This header is part of the `cudaq::analysis` module. It is consumed by
+/// CUDA-QX's `cudaq::qec::dem_from_kernel(...)` user-facing wrapper. The
+/// `cudaq::analysis` namespace is public (cross-repo), not internal, because
+/// CUDA-QX (a separate repo) depends on it.
 ///
 /// Concepts:
 ///
@@ -38,7 +38,7 @@
 
 #pragma once
 
-#include "cudaq_internal/analysis/DemPolicy.h"
+#include "cudaq/analysis/DemPolicy.h"
 
 #include "common/ExecutionContext.h"
 #include "cudaq/platform.h"
@@ -52,7 +52,7 @@ namespace cudaq {
 class noise_model;
 } // namespace cudaq
 
-namespace cudaq_internal::analysis {
+namespace cudaq::analysis {
 
 namespace detail {
 
@@ -125,4 +125,4 @@ DemData computeDem(QuantumKernel &&kernel, Args &&...args) {
                     /*noise=*/nullptr, std::forward<Args>(args)...);
 }
 
-} // namespace cudaq_internal::analysis
+} // namespace cudaq::analysis
