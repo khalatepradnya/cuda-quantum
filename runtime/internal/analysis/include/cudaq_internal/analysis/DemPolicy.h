@@ -8,10 +8,10 @@
 
 /// @file DemPolicy.h
 /// @brief Light header defining the `dem_policy` tag and `DemData` result
-///        struct. Split out of `Dem.h` so that `cudaq/algorithms/policy_dispatch.h`
-///        (which is transitively included by every NVQIR simulator) can pull
-///        in the policy without dragging in `cudaq/platform.h` and the kernel
-///        builder.
+///        struct. Split out of `Dem.h` so that
+///        `cudaq/algorithms/policy_dispatch.h` (which is transitively included
+///        by every NVQIR simulator) can pull in the policy without dragging in
+///        `cudaq/platform.h` and the kernel builder.
 ///
 /// The full engine entry point (`computeDem`, `ScopedAnalysisSimulator`) lives
 /// in `Dem.h`, which includes this header.
@@ -100,10 +100,9 @@ struct dem_policy {
   // the caller (`runComputeDem`) reads it back. When the policy CPO grows a
   // typed result channel that does not require per-type visitor handlers,
   // change this signature to `DemData` and remove the TLS slot.
-  friend void
-  finalize_simulation_circuit_impl(nvqir::CircuitSimulator &sim,
-                                   const dem_policy &policy,
-                                   cudaq::ExecutionContext &ctx);
+  friend void finalize_simulation_circuit_impl(nvqir::CircuitSimulator &sim,
+                                               const dem_policy &policy,
+                                               cudaq::ExecutionContext &ctx);
 };
 
 } // namespace cudaq_internal::analysis

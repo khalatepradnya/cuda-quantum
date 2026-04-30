@@ -18,8 +18,9 @@
 /// Concepts:
 ///
 ///   - `dem_policy`     Tag + options struct for DEM analysis. Mirrors the
-///                      shape of `cudaq::sample_policy` / `cudaq::observe_policy`
-///                      so dispatch through the existing CPO infrastructure
+///                      shape of `cudaq::sample_policy` /
+///                      `cudaq::observe_policy` so dispatch through the
+///                      existing CPO infrastructure
 ///                      (`policy_dispatch.h`, `policy_cpos.h`) works without
 ///                      bespoke plumbing. Defined in `DemPolicy.h`.
 ///
@@ -29,8 +30,8 @@
 ///   - `computeDem`     Templated entry point that drives a kernel through
 ///                      the DEM analysis path. Parallels `estimate_resources`
 ///                      in shape — wraps kernel + args, sets up the analysis
-///                      execution context, runs through `with_execution_context`,
-///                      returns `DemData`.
+///                      execution context, runs through
+///                      `with_execution_context`, returns `DemData`.
 ///
 /// "Stim" is an implementation detail of the DEM engine, not part of its
 /// public surface. The engine may be re-implemented over a different backend
@@ -112,9 +113,9 @@ DemData computeDem(QuantumKernel &&kernel, const cudaq::noise_model *noise,
                    Args &&...args) {
   auto &platform = cudaq::get_platform();
   auto kernelName = cudaq::getKernelName(kernel);
-  return detail::runComputeDem(
-      kernelName, platform, noise,
-      [&]() mutable { kernel(std::forward<Args>(args)...); });
+  return detail::runComputeDem(kernelName, platform, noise, [&]() mutable {
+    kernel(std::forward<Args>(args)...);
+  });
 }
 
 /// @brief Convenience overload for the no-noise case.
