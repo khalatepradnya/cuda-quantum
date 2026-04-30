@@ -29,11 +29,11 @@
 // This file describes the API for a default qubit logical instruction
 // set for CUDA-Q kernels.
 
-namespace cudaq {
-
-namespace details {
+namespace cudaq::details {
 void warn(const std::string_view msg);
-}
+} // namespace cudaq::details
+
+namespace cudaq {
 
 // Define the common single qubit operations.
 namespace qubit_op {
@@ -426,38 +426,58 @@ inline void reset(qubit &q) {
   getExecutionManager()->reset({q.n_levels(), q.id()});
 }
 
-// Measurement primitives.
-//
-// Library-mode and MLIR-compiler mode have intentionally different `mz` /
-// `my` / `mx` signatures. The MLIR-mode API returns `cudaq::measure_handle` (or
-// `std::vector<measure_handle>`) and the AST bridge intercepts every call
-// inside `__qpu__` regions; `measure_handle` is not supported in library mode,
-// so library mode keeps the legacy `measure_result`-returning API unchanged.
-
-#ifdef CUDAQ_LIBRARY_MODE
-
-/// @brief Measure an individual qubit, return 0,1 as `bool`
-inline measure_result mz(qubit &q) {
-  return getExecutionManager()->measure(QuditInfo{q.n_levels(), q.id()});
+namespace details {
+inline void abortMeasurementHostCallInMLIR() {
+#ifndef CUDAQ_LIBRARY_MODE
+  std::abort();
+#endif
 }
 
-/// @brief Measure an individual qubit in `x` basis, return 0,1 as `bool`
-inline measure_result mx(qubit &q) {
+inline measure_result measureZ(qubit &q) {
+#ifdef CUDAQ_LIBRARY_MODE
+  return getExecutionManager()->measure(QuditInfo{q.n_levels(), q.id()});
+#else
+  (void)q;
+  std::abort();
+#endif
+}
+
+inline measure_result measureX(qubit &q) {
+#ifdef CUDAQ_LIBRARY_MODE
   h(q);
   return getExecutionManager()->measure(QuditInfo{q.n_levels(), q.id()});
+#else
+  (void)q;
+  std::abort();
+#endif
 }
 
-/// @brief Measure an individual qubit in `y` basis, return 0,1 as `bool`
-inline measure_result my(qubit &q) {
+inline measure_result measureY(qubit &q) {
+#ifdef CUDAQ_LIBRARY_MODE
   r1(-M_PI_2, q);
   h(q);
   return getExecutionManager()->measure(QuditInfo{q.n_levels(), q.id()});
+#else
+  (void)q;
+  std::abort();
+#endif
 }
+} // namespace details
+
+/// @brief Measure an individual qubit, return 0,1 as `bool`
+inline measure_result mz(qubit &q) { return details::measureZ(q); }
+
+/// @brief Measure an individual qubit in `x` basis, return 0,1 as `bool`
+inline measure_result mx(qubit &q) { return details::measureX(q); }
+
+/// @brief Measure an individual qubit in `y` basis, return 0,1 as `bool`
+inline measure_result my(qubit &q) { return details::measureY(q); }
 
 // Measure all qubits in the range, return vector of 0,1
 template <typename QubitRange>
   requires std::ranges::range<QubitRange>
 std::vector<measure_result> mz(QubitRange &q) {
+  details::abortMeasurementHostCallInMLIR();
   std::vector<measure_result> b;
   for (auto &qq : q) {
     b.push_back(mz(qq));
@@ -467,6 +487,7 @@ std::vector<measure_result> mz(QubitRange &q) {
 
 template <std::size_t Levels>
 std::vector<measure_result> mz(const qview<Levels> &q) {
+  details::abortMeasurementHostCallInMLIR();
   std::vector<measure_result> b;
   for (auto &qq : q) {
     b.emplace_back(mz(qq));
@@ -480,6 +501,7 @@ std::vector<measure_result> mz(qubit &q, Qs &&...qs);
 template <typename QubitRange, typename... Qs>
   requires(std::ranges::range<QubitRange>)
 std::vector<measure_result> mz(QubitRange &qr, Qs &&...qs) {
+  details::abortMeasurementHostCallInMLIR();
   std::vector<measure_result> result = mz(qr);
   auto rest = mz(std::forward<Qs>(qs)...);
   if constexpr (std::is_same_v<decltype(rest), measure_result>) {
@@ -492,6 +514,7 @@ std::vector<measure_result> mz(QubitRange &qr, Qs &&...qs) {
 
 template <typename... Qs>
 std::vector<measure_result> mz(qubit &q, Qs &&...qs) {
+  details::abortMeasurementHostCallInMLIR();
   std::vector<measure_result> result = {mz(q)};
   auto rest = mz(std::forward<Qs>(qs)...);
   if constexpr (std::is_same_v<decltype(rest), measure_result>) {
@@ -502,99 +525,99 @@ std::vector<measure_result> mz(qubit &q, Qs &&...qs) {
   return result;
 }
 
-#else // !CUDAQ_LIBRARY_MODE -- spec applies, AST bridge intercepts.
-
-// The bodies exist only so
-// that name lookup succeeds before bridge interception runs; reaching one
-// at runtime means a host caller bypassed the kernel boundary, which
-// `std::abort()` traps loudly per the spec's `__qpu__`-only rule.
-
-/// @brief Measure an individual qubit in the Z basis.
-inline measure_handle mz(qubit &q) { std::abort(); }
-
-/// @brief Measure an individual qubit in the X basis.
-inline measure_handle mx(qubit &q) { std::abort(); }
-
-/// @brief Measure an individual qubit in the Y basis.
-inline measure_handle my(qubit &q) { std::abort(); }
-
-// Range overloads
 template <typename QubitRange>
   requires std::ranges::range<QubitRange>
-std::vector<measure_handle> mz(QubitRange &q) {
-  std::abort();
+std::vector<measure_result> mx(QubitRange &q) {
+  details::abortMeasurementHostCallInMLIR();
+  std::vector<measure_result> b;
+  for (auto &qq : q)
+    b.push_back(mx(qq));
+  return b;
 }
 
 template <std::size_t Levels>
-std::vector<measure_handle> mz(const qview<Levels> &q) {
-  std::abort();
+std::vector<measure_result> mx(const qview<Levels> &q) {
+  details::abortMeasurementHostCallInMLIR();
+  std::vector<measure_result> b;
+  for (auto &qq : q)
+    b.emplace_back(mx(qq));
+  return b;
 }
 
 template <typename... Qs>
-std::vector<measure_handle> mz(qubit &q, Qs &&...qs);
+std::vector<measure_result> mx(qubit &q, Qs &&...qs);
 
 template <typename QubitRange, typename... Qs>
   requires(std::ranges::range<QubitRange>)
-std::vector<measure_handle> mz(QubitRange &qr, Qs &&...qs) {
-  std::abort();
+std::vector<measure_result> mx(QubitRange &qr, Qs &&...qs) {
+  details::abortMeasurementHostCallInMLIR();
+  std::vector<measure_result> result = mx(qr);
+  auto rest = mx(std::forward<Qs>(qs)...);
+  if constexpr (std::is_same_v<decltype(rest), measure_result>)
+    result.push_back(rest);
+  else
+    result.insert(result.end(), rest.begin(), rest.end());
+  return result;
 }
 
 template <typename... Qs>
-std::vector<measure_handle> mz(qubit &q, Qs &&...qs) {
-  std::abort();
-}
-
-template <typename QubitRange>
-  requires std::ranges::range<QubitRange>
-std::vector<measure_handle> mx(QubitRange &q) {
-  std::abort();
-}
-
-template <std::size_t Levels>
-std::vector<measure_handle> mx(const qview<Levels> &q) {
-  std::abort();
-}
-
-template <typename... Qs>
-std::vector<measure_handle> mx(qubit &q, Qs &&...qs);
-
-template <typename QubitRange, typename... Qs>
-  requires(std::ranges::range<QubitRange>)
-std::vector<measure_handle> mx(QubitRange &qr, Qs &&...qs) {
-  std::abort();
-}
-
-template <typename... Qs>
-std::vector<measure_handle> mx(qubit &q, Qs &&...qs) {
-  std::abort();
+std::vector<measure_result> mx(qubit &q, Qs &&...qs) {
+  details::abortMeasurementHostCallInMLIR();
+  std::vector<measure_result> result = {mx(q)};
+  auto rest = mx(std::forward<Qs>(qs)...);
+  if constexpr (std::is_same_v<decltype(rest), measure_result>)
+    result.push_back(rest);
+  else
+    result.insert(result.end(), rest.begin(), rest.end());
+  return result;
 }
 
 template <typename QubitRange>
   requires std::ranges::range<QubitRange>
-std::vector<measure_handle> my(QubitRange &q) {
-  std::abort();
+std::vector<measure_result> my(QubitRange &q) {
+  details::abortMeasurementHostCallInMLIR();
+  std::vector<measure_result> b;
+  for (auto &qq : q)
+    b.push_back(my(qq));
+  return b;
 }
 
 template <std::size_t Levels>
-std::vector<measure_handle> my(const qview<Levels> &q) {
-  std::abort();
+std::vector<measure_result> my(const qview<Levels> &q) {
+  details::abortMeasurementHostCallInMLIR();
+  std::vector<measure_result> b;
+  for (auto &qq : q)
+    b.emplace_back(my(qq));
+  return b;
 }
 
 template <typename... Qs>
-std::vector<measure_handle> my(qubit &q, Qs &&...qs);
+std::vector<measure_result> my(qubit &q, Qs &&...qs);
 
 template <typename QubitRange, typename... Qs>
   requires(std::ranges::range<QubitRange>)
-std::vector<measure_handle> my(QubitRange &qr, Qs &&...qs) {
-  std::abort();
+std::vector<measure_result> my(QubitRange &qr, Qs &&...qs) {
+  details::abortMeasurementHostCallInMLIR();
+  std::vector<measure_result> result = my(qr);
+  auto rest = my(std::forward<Qs>(qs)...);
+  if constexpr (std::is_same_v<decltype(rest), measure_result>)
+    result.push_back(rest);
+  else
+    result.insert(result.end(), rest.begin(), rest.end());
+  return result;
 }
 
 template <typename... Qs>
-std::vector<measure_handle> my(qubit &q, Qs &&...qs) {
-  std::abort();
+std::vector<measure_result> my(qubit &q, Qs &&...qs) {
+  details::abortMeasurementHostCallInMLIR();
+  std::vector<measure_result> result = {my(q)};
+  auto rest = my(std::forward<Qs>(qs)...);
+  if constexpr (std::is_same_v<decltype(rest), measure_result>)
+    result.push_back(rest);
+  else
+    result.insert(result.end(), rest.begin(), rest.end());
+  return result;
 }
-
-#endif // CUDAQ_LIBRARY_MODE
 
 namespace support {
 // Helpers to deal with the `vector<bool>` specialized template type.
@@ -624,9 +647,8 @@ inline std::int64_t to_integer(const std::vector<measure_result> &bits) {
   return ret;
 }
 
-#ifdef CUDAQ_LIBRARY_MODE
-// Library-mode `measure_result` is a class type, so this `vector<bool>`
-// overload is a genuinely distinct signature.
+// `measure_result` is a class-like type in both library mode and MLIR mode, so
+// this `vector<bool>` overload is a genuinely distinct signature.
 inline std::int64_t to_integer(const std::vector<bool> &bits) {
   std::int64_t ret = 0;
   for (std::size_t i = 0; i < bits.size(); i++) {
@@ -636,7 +658,6 @@ inline std::int64_t to_integer(const std::vector<bool> &bits) {
   }
   return ret;
 }
-#endif
 
 inline std::int64_t to_integer(const std::string &arg) {
   std::string bitString{arg};
@@ -651,9 +672,7 @@ inline std::int64_t to_integer(const std::string &arg) {
 //
 // In MLIR-compiler mode the AST bridge intercepts this call and lowers it
 // to a vectorized `quake.discriminate` consuming
-// `!cc.stdvec<!cc.measure_handle>` and producing `!cc.stdvec<i1>`. The
-// inline body below runs in library mode only and walks the handle vector
-// through `operator bool()` one element at a time.
+// `!cc.stdvec<!cc.measure_handle>` and producing `!cc.stdvec<i1>`.
 inline std::vector<bool>
 to_bools(const std::vector<measure_handle> & /*handles*/) {
   std::abort();

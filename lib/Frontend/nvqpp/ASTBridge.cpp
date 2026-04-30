@@ -659,6 +659,7 @@ void ASTBridgeAction::ASTBridgeConsumer::HandleTranslationUnit(
                 "measure_handle cannot cross the host-device boundary; "
                 "entry-point kernels must discriminate first");
           }
+          continue;
         }
         // Flag func as an entry point to a quantum kernel.
         func->setAttr(entryPointAttrName, unitAttr);

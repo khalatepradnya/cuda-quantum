@@ -790,6 +790,11 @@ std::pair<bool, func::FuncOp> cudaq::opt::marshal::lookupHostEntryPointFunc(
     // No host entry point needed.
     return {false, func::FuncOp{}};
   }
+  // Device-only kernels with signatures that cannot cross the host boundary
+  // have no host-side entry point to rewrite.
+  if (!funcOp->hasAttr(cudaq::entryPointAttrName) &&
+      !cudaq::opt::marshal::hasLegalType(funcOp.getFunctionType()))
+    return {false, func::FuncOp{}};
   if (auto *decl = module.lookupSymbol(mangledEntryPointName))
     if (auto func = dyn_cast<func::FuncOp>(decl)) {
       func.eraseBody();

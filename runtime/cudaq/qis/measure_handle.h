@@ -15,9 +15,7 @@
 #include <cstdint>
 #include <limits>
 
-namespace cudaq {
-
-namespace details {
+namespace cudaq::details {
 /// Tag type used to dispatch the index-taking `measure_handle` constructor,
 /// so `measure_handle{42}` cannot be compiled in user code. The tag surface is
 /// reserved for internal runtime use. Inside `__qpu__` regions the
@@ -25,7 +23,9 @@ namespace details {
 /// `!cc.measure_handle` SSA values directly.
 struct handle_index_t {};
 inline constexpr handle_index_t handle_index{};
-} // namespace details
+} // namespace cudaq::details
+
+namespace cudaq {
 
 /// @brief Handle for a measurement event with deferred discrimination.
 ///
