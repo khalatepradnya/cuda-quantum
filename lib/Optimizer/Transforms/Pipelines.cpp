@@ -83,6 +83,11 @@ static void
 createHardwareTargetPrepPipeline(OpPassManager &pm,
                                  const TargetPrepPipelineOptions &options) {
   pm.addNestedPass<func::FuncOp>(cudaq::opt::createEraseNoise());
+  // Strip QEC annotations on the hardware path. They are inert from a
+  // quantum-mechanical perspective and only meaningful for analysis engines
+  // (DEM via Stim). The emulation pipeline keeps them so the analysis path
+  // can observe them in the recorded circuit.
+  pm.addNestedPass<func::FuncOp>(cudaq::opt::createEraseQEC());
   createTargetPrepPipeline(pm, options);
   pm.addNestedPass<func::FuncOp>(cudaq::opt::createStatePreparation());
 }
