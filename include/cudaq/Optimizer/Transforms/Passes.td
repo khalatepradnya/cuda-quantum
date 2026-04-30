@@ -440,6 +440,24 @@ def EraseNoise : Pass<"erase-noise"> {
   }];
 }
 
+def EraseQEC : Pass<"erase-qec"> {
+  let summary = "Erase QEC detector and observable declarations.";
+  let description = [{
+    Removes `qec.detector`, `qec.logical_observable`, and
+    `qec.detectors_vectorized` operations from the IR. These ops are
+    annotations: they declare relationships among prior measurement results
+    for analysis engines (DEM via Stim) but produce no quantum-mechanical
+    effect. Hardware targets and simulators that do not implement the QEC
+    runtime ABI must strip them before codegen so QIR emission does not
+    reference unimplemented `__quantum__qis__detector_*` runtime calls.
+
+    Slot this pass into the hardware preparation pipeline next to
+    `erase-noise`. The emulation pipeline keeps these ops so that the
+    analysis-engine path (`cudaq_internal::analysis::computeDem`) can read
+    them out of the recorded Stim circuit.
+  }];
+}
+
 def EraseNopCalls : Pass<"erase-nop-calls"> {
   let summary = "Erase calls to any builtin intrinsics that are NOPs.";
   let description = [{
