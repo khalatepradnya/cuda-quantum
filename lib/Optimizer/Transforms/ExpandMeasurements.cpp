@@ -19,8 +19,9 @@
 using namespace mlir;
 
 // Only an individual qubit measurement returns a scalar token. Both
-// `!quake.measure` and `!cc.measure_handle` are scalar per-qubit measurement
-// results, so neither requires expansion to a register.
+// `!quake.measure` (legacy `bool`/`Result*` token) and `!cc.measure_handle`
+// (the IR alias of `cudaq::measure_handle`, an `i64` payload) are scalar
+// per-qubit measurement results, so neither requires expansion to a register.
 template <typename A>
 bool usesIndividualQubit(A x) {
   return isa<quake::MeasureType, cudaq::cc::MeasureHandleType>(x.getType());

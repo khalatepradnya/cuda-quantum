@@ -1334,10 +1334,10 @@ struct MeasurementOpPattern : public OpConversionPattern<quake::MzOp> {
                             adaptor.getTargets().end()};
     auto functionName = M::getQIRMeasure();
 
-    // Handle-form measurements (`mz_handle`/`mx_handle`/`my_handle` callers)
-    // produce a `!cc.measure_handle` SSA value whose converted type is `i64`.
-    // The QIR measurement function still returns `Result*`, so we bridge the
-    // call's `Result*` result to the converted `i64` payload via `cc.cast`.
+    // Handle-form measurements produce a `!cc.measure_handle` SSA value
+    // whose converted type is `i64`. The QIR measurement function still
+    // returns `Result*`, so we bridge the call's `Result*` result to the
+    // converted `i64` payload via `cc.cast`.
     const bool measOutIsHandle =
         isa<cudaq::cc::MeasureHandleType>(mz.getMeasOut().getType());
 
@@ -1392,11 +1392,11 @@ struct MeasurementOpPattern : public OpConversionPattern<quake::MzOp> {
       // here so it dominates downstream uses. The `!discriminateToClassical`
       // branch below moves the insertion point to the block terminator for
       // the record-output call, after which a cast would not dominate.
-      Value handleRes;
-      if (measOutIsHandle) {
-        auto i64Ty = rewriter.getI64Type();
-        handleRes = rewriter.create<cudaq::cc::CastOp>(loc, i64Ty, res);
-      }
+
+      auto i64Ty = rewriter.getI64Type();
+      Value handleRes =
+          measOutIsHandle ? rewriter.create<cudaq::cc::CastOp>(loc, i64Ty, res)
+                          : res;
       auto cstringGlobal =
           createGlobalCString(mz, loc, rewriter, regNameAttr.getValue());
       if constexpr (!M::discriminateToClassical) {
@@ -1414,8 +1414,7 @@ struct MeasurementOpPattern : public OpConversionPattern<quake::MzOp> {
         recOut->setAttr(cudaq::opt::ResultIndexAttrName, resultAttr);
         recOut->setAttr(cudaq::opt::QIRRegisterNameAttr, regNameAttr);
       }
-      SmallVector<Value> results;
-      results.push_back(measOutIsHandle ? handleRes : res);
+      SmallVector<Value> results = {handleRes};
       auto assundry = filterArgs(mz, adaptor.getTargets());
       results.append(assundry.begin(), assundry.end());
       rewriter.replaceOp(mz, results);
