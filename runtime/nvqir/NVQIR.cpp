@@ -46,10 +46,10 @@ thread_local nvqir::CircuitSimulator *simulator;
 /// @brief Per-thread analysis-engine override. When non-null, takes
 /// precedence over both the resource counter and the user-selected target
 /// simulator, so that an analysis pass (e.g., DEM via
-/// `cudaq_internal::analysis`) can force a specific backend (Stim) without
+/// `cudaq::analysis`) can force a specific backend (Stim) without
 /// disturbing the active target. Managed by `nvqir::pushAnalysisSimulator` /
 /// `popAnalysisSimulator`, with RAII bookkeeping in
-/// `cudaq_internal::analysis::detail::ScopedAnalysisSimulator`.
+/// `cudaq::analysis::detail::ScopedAnalysisSimulator`.
 thread_local nvqir::CircuitSimulator *analysisSimulator = nullptr;
 inline static constexpr std::string_view GetCircuitSimulatorSymbol =
     "getCircuitSimulator";

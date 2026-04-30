@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2022 - 2026 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2026 NVIDIA Corporation & Affiliates.                         *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -13,9 +13,9 @@
 ///   1. The simulator (which sees `dem_policy` via `policy_dispatch.h`)
 ///      does not need to depend on Stim headers.
 ///   2. The CUDA-QX wrapper (`cudaq::qec::dem_from_kernel`) can include
-///      `cudaq_internal/analysis/Dem.h` (light) without dragging in Stim.
+///      `cudaq/analysis/Dem.h` (light) without dragging in Stim.
 
-#include "cudaq_internal/analysis/Dem.h"
+#include "cudaq/analysis/Dem.h"
 
 #include "common/ExecutionContext.h"
 #include "common/NoiseModel.h"
@@ -44,7 +44,7 @@ void popAnalysisSimulator();
 CircuitSimulator *getCircuitSimulatorInternal();
 } // namespace nvqir
 
-namespace cudaq_internal::analysis {
+namespace cudaq::analysis {
 
 // ===========================================================================
 // ScopedAnalysisSimulator — RAII override of the active NVQIR simulator
@@ -100,7 +100,7 @@ DemData runComputeDem(const std::string &kernelName,
   std::string repr = sim->getCircuitRepr();
   if (repr.empty())
     throw std::runtime_error(
-        "cudaq_internal::analysis::computeDem: simulator '" + sim->name() +
+        "cudaq::analysis::computeDem: simulator '" + sim->name() +
         "' produced an empty circuit repr. DEM analysis requires a "
         "Stim-format recorded circuit (only the Stim NVQIR backend supports "
         "this today).");
@@ -132,4 +132,4 @@ DemData runComputeDem(const std::string &kernelName,
 }
 
 } // namespace detail
-} // namespace cudaq_internal::analysis
+} // namespace cudaq::analysis

@@ -11,7 +11,7 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 # Headers-only INTERFACE target for the analysis-engine module. Registered
 # here (rather than inside `internal/analysis/CMakeLists.txt`) because
 # `cudaq/algorithms/policy_dispatch.h` includes
-# `cudaq_internal/analysis/DemPolicy.h` and is consumed by `cudaq-common` /
+# `cudaq/analysis/DemPolicy.h` and is consumed by `cudaq-common` /
 # `nvqir`, which are configured before `internal/`. The matching `.cpp`
 # library `cudaq-analysis` is registered later via `internal/analysis/`,
 # which can come after `nvqir` because libstim is registered through

@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2022 - 2026 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2026 NVIDIA Corporation & Affiliates.                         *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -21,7 +21,7 @@
 #include <cstddef>
 #include <string>
 
-namespace cudaq_internal::analysis {
+namespace cudaq::analysis {
 
 // =============================================================================
 // DemData — analysis engine result type
@@ -77,4 +77,4 @@ struct DemData {
 /// the finalize path.
 struct dem_policy {};
 
-} // namespace cudaq_internal::analysis
+} // namespace cudaq::analysis
