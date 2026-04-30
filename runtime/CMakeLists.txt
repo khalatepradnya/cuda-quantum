@@ -8,10 +8,29 @@
 
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
+# Headers-only INTERFACE target for the analysis-engine module. Registered
+# here (rather than inside `internal/analysis/CMakeLists.txt`) because
+# `cudaq/algorithms/policy_dispatch.h` includes
+# `cudaq_internal/analysis/DemPolicy.h` and is consumed by `cudaq-common` /
+# `nvqir`, which are configured before `internal/`. The matching `.cpp`
+# library `cudaq-analysis` is registered later via `internal/analysis/`,
+# which can come after `nvqir` because libstim is registered through
+# `nvqir/stim`.
+add_library(cudaq-analysis-headers INTERFACE)
+target_include_directories(cudaq-analysis-headers INTERFACE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/internal/analysis/include>
+  $<INSTALL_INTERFACE:include>
+)
+install(TARGETS cudaq-analysis-headers EXPORT cudaq-analysis-targets)
+
 add_subdirectory(logger)
-add_subdirectory(internal)
 add_subdirectory(common)
 add_subdirectory(nvqir)
+# `internal` registers the compiler runtime (cudaq-mlir-runtime) and the
+# analysis-engine module (cudaq-analysis). It must come after `nvqir` because
+# the analysis subdir consumes `libstim`, which is registered transitively
+# through `nvqir/stim`.
+add_subdirectory(internal)
 add_subdirectory(cudaq)
 add_subdirectory(test)
 

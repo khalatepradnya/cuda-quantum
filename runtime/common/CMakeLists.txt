@@ -48,6 +48,11 @@ target_include_directories(${LIBRARY_NAME}
 target_link_libraries(${LIBRARY_NAME}
   PUBLIC
     cudaq-operator
+    # `cudaq/algorithms/policy_dispatch.h` (consumed transitively by every
+    # NVQIR simulator via `CircuitSimulator.h`) includes
+    # `cudaq_internal/analysis/DemPolicy.h`. Linking the headers-only target
+    # PUBLIC propagates its include path to all common consumers.
+    cudaq-analysis-headers
   PRIVATE
     cudaq-logger
     fmt::fmt-header-only
