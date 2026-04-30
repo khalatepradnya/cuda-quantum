@@ -9,9 +9,9 @@
 #include "PassDetails.h"
 #include "cudaq/Optimizer/Dialect/QEC/QECOps.h"
 #include "cudaq/Optimizer/Transforms/Passes.h"
+#include "llvm/Support/Debug.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
-#include "llvm/Support/Debug.h"
 
 namespace cudaq::opt {
 #define GEN_PASS_DEF_ERASEQEC

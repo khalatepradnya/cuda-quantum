@@ -32,11 +32,12 @@
 // =============================================================================
 //
 // These are the analysis-engine-side counterparts of
-// `nvqir::switchToResourceCounterSimulator` / `stopUsingResourceCounterSimulator`.
-// They live in `runtime/nvqir/NVQIR.cpp`. Forward-declared here so libcudaq-analysis
-// does not pull a public NVQIR analysis header just to wire two functions; if
-// a third analysis engine appears, this should be promoted to a small shared
-// header (e.g., `runtime/nvqir/AnalysisSim.h`).
+// `nvqir::switchToResourceCounterSimulator` /
+// `stopUsingResourceCounterSimulator`. They live in `runtime/nvqir/NVQIR.cpp`.
+// Forward-declared here so libcudaq-analysis does not pull a public NVQIR
+// analysis header just to wire two functions; if a third analysis engine
+// appears, this should be promoted to a small shared header (e.g.,
+// `runtime/nvqir/AnalysisSim.h`).
 namespace nvqir {
 void pushAnalysisSimulator(const std::string &pluginName);
 void popAnalysisSimulator();
