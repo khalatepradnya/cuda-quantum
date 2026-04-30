@@ -748,6 +748,12 @@ public:
     return ss.str();
   }
 
+  /// @brief Drop the accumulated `recordedCircuit` so the next run starts
+  /// with an empty circuit. Used by the analysis-engine override path
+  /// (`nvqir::pushAnalysisSimulator`) — DEM analysis must not see residue
+  /// from a prior run on this thread-local Stim instance.
+  void resetCircuitRepr() override { recordedCircuit = stim::Circuit(); }
+
   bool isStateVectorSimulator() const override { return false; }
 
   std::string name() const override { return "stim"; }

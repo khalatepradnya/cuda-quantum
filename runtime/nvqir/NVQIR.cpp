@@ -42,6 +42,15 @@
 thread_local bool initialized = false;
 thread_local bool using_resource_counter = false;
 thread_local nvqir::CircuitSimulator *simulator;
+
+/// @brief Per-thread analysis-engine override. When non-null, takes
+/// precedence over both the resource counter and the user-selected target
+/// simulator, so that an analysis pass (e.g., DEM via
+/// `cudaq_internal::analysis`) can force a specific backend (Stim) without
+/// disturbing the active target. Managed by `nvqir::pushAnalysisSimulator` /
+/// `popAnalysisSimulator`, with RAII bookkeeping in
+/// `cudaq_internal::analysis::detail::ScopedAnalysisSimulator`.
+thread_local nvqir::CircuitSimulator *analysisSimulator = nullptr;
 inline static constexpr std::string_view GetCircuitSimulatorSymbol =
     "getCircuitSimulator";
 
@@ -98,6 +107,9 @@ CircuitSimulator *getCircuitSimulatorInternal() {
   if (using_resource_counter)
     return getResourceCounterSimulator();
 
+  if (analysisSimulator)
+    return analysisSimulator;
+
   if (simulator)
     return simulator;
 
@@ -134,6 +146,34 @@ void stopUsingResourceCounterSimulator() {
 }
 
 bool isUsingResourceCounterSimulator() { return using_resource_counter; }
+
+void pushAnalysisSimulator(const std::string &pluginName) {
+  if (analysisSimulator)
+    throw std::runtime_error(
+        "nvqir::pushAnalysisSimulator: nested analysis override is not "
+        "supported (active analysis simulator: " +
+        analysisSimulator->name() + ")");
+  std::string symbol = "getCircuitSimulator_" + pluginName;
+  analysisSimulator = cudaq::getUniquePluginInstance<CircuitSimulator>(symbol);
+  if (!analysisSimulator)
+    throw std::runtime_error(
+        "nvqir::pushAnalysisSimulator: failed to load analysis simulator "
+        "plugin '" +
+        pluginName + "'");
+  // The plugin returns a cached singleton, so any state from a prior
+  // analysis run is still attached. Drop the recorded circuit so the new
+  // run starts clean.
+  analysisSimulator->resetCircuitRepr();
+  CUDAQ_INFO("Analysis simulator override active: {}",
+             analysisSimulator->name());
+}
+
+void popAnalysisSimulator() {
+  if (!analysisSimulator)
+    return;
+  analysisSimulator->setToZeroState();
+  analysisSimulator = nullptr;
+}
 
 void setRandomSeed(std::size_t seed) {
   getCircuitSimulatorInternal()->setRandomSeed(seed);

@@ -9,6 +9,7 @@
 #pragma once
 
 #include "cudaq/algorithms/policies.h"
+#include "cudaq_internal/analysis/DemPolicy.h"
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -77,9 +78,18 @@ void withPolicy(std::string_view name, Func &&func) {
   // One static array per Func instantiation — initialized once, no heap
   // allocation. To add a new policy, append an entry here and define the policy
   // struct above.
+  //
+  // FIXME(runtime-team): the registry is a flat list edited centrally. Each
+  // new analysis engine has to land here, which couples engine modules to a
+  // file in cudaq/algorithms/. A registration point that lets engines opt in
+  // from their own translation unit (similar to NVQIR_REGISTER_SIMULATOR)
+  // would let the analysis category stay extensible without touching this
+  // file. For v1, dem_policy is added by name with a default-constructed
+  // instance, since the CPO cannot carry caller-provided state today.
   static const Entry registry[] = {
       {"sample", [](FuncRef f) { f(sample_policy{}); }},
       {"observe", [](FuncRef f) { f(observe_policy{}); }},
+      {"dem", [](FuncRef f) { f(cudaq_internal::analysis::dem_policy{}); }},
   };
 
   for (auto &[key, dispatch] : registry) {

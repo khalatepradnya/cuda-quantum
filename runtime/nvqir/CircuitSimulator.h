@@ -423,6 +423,15 @@ public:
   /// of the public CUDA-Q API.
   virtual std::string getCircuitRepr() const { return ""; }
 
+  /// @brief Reset any state backing `getCircuitRepr` so a subsequent run
+  /// starts from an empty recorded circuit. Default no-op; backends that
+  /// accumulate a circuit (Stim) override.
+  ///
+  /// Used by `nvqir::pushAnalysisSimulator` to ensure each analysis run
+  /// (e.g., DEM) sees only ops from its own kernel, not residue from prior
+  /// invocations of the same simulator instance.
+  virtual void resetCircuitRepr() {}
+
   /// @brief Return the chronological index of the most recent measurement.
   /// Used by the handle-form `mz` runtime path to populate the kernel-level
   /// `measure_handle` value with an index that aligns with the simulator's
