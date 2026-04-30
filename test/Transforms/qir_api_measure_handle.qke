@@ -27,13 +27,13 @@ func.func @scalar_handle() -> i1 attributes {"cudaq-entrypoint", "cudaq-kernel"}
 // CHECK:           %[[VAL_Q:.*]] = call @__quantum__rt__qubit_allocate()
 // CHECK:           %[[VAL_R:.*]] = call @__quantum__qis__mz__to__register(%[[VAL_Q]], {{%.*}}) {{.*}} -> !cc.ptr<!llvm.struct<"Result", opaque>>
 // `MeasurementOpPattern` casts the QIR call's `Result*` to the converted
-// `i64` payload (the handle).
-// CHECK:           %[[VAL_I:.*]] = cc.cast %[[VAL_R]] : (!cc.ptr<!llvm.struct<"Result", opaque>>) -> i64
-// `DiscriminateOpToCallRewrite` (full-QIR / `!discriminateToClassical`) casts
-// the i64 to `!cc.ptr<i1>` and loads. The transient `i64 -> Result* -> i64`
-// round-trip introduced by the handle bridge folds out, leaving a single
-// `cc.cast` from i64.
-// CHECK:           %[[VAL_P:.*]] = cc.cast %[[VAL_I]] : (i64) -> !cc.ptr<i1>
+// `i64` payload, and `DiscriminateOpToCallRewrite` casts back to
+// `!cc.ptr<i1>`. The two pointer endpoints (`Result*` and `ptr<i1>`) are
+// joined by an i64 round-trip whose only purpose was the handle ABI; the
+// `FuseCastCascade` `ptr -> int -> ptr` rule collapses the chain into a
+// single pointer cast that lowers to `llvm.bitcast`. This avoids the
+// `llvm.ptrtoint` that the NVQIR profile verifier rejects.
+// CHECK:           %[[VAL_P:.*]] = cc.cast %[[VAL_R]] : (!cc.ptr<!llvm.struct<"Result", opaque>>) -> !cc.ptr<i1>
 // CHECK:           %[[VAL_B:.*]] = cc.load %[[VAL_P]] : !cc.ptr<i1>
 // CHECK:           return %[[VAL_B]] : i1
 

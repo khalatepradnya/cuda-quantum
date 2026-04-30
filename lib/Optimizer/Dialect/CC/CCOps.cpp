@@ -460,25 +460,35 @@ LogicalResult cudaq::cc::CastOp::verify() {
 }
 
 namespace {
-// There are a number of series of casts that can be fused. For now, fuse
-// pointer cast chains.
+// Fold cast cascades whose endpoints are both pointer types. Two shapes:
+//   - ptr -> ptr -> ptr  (eliminate the intermediate pointer view)
+//   - ptr -> int -> ptr  (eliminate the integer round-trip)
+// `cc.cast` is a value-preserving type-only view, so collapsing either shape
+// to a single `ptr -> ptr` cast is always safe. The integer-round-trip case
+// also matters for the QIR profile pipelines: the discriminate / measurement
+// patterns build `Result* -> i64 -> ... -> ptr<i1>` chains, and the trailing
+// `Result* -> i64` lowers to `llvm.ptrtoint`, which the NVQIR profile
+// verifier rejects (only `bitcast`, `inttoptr`, etc. are allow-listed for
+// pointer-typed operands). After this fold + DCE the chain collapses to a
+// single `ptr -> ptr` cast that lowers to `llvm.bitcast`.
 struct FuseCastCascade : public OpRewritePattern<cudaq::cc::CastOp> {
   using OpRewritePattern::OpRewritePattern;
 
   LogicalResult matchAndRewrite(cudaq::cc::CastOp castOp,
                                 PatternRewriter &rewriter) const override {
-    if (auto castToCast = castOp.getValue().getDefiningOp<cudaq::cc::CastOp>())
-      if (isa<cudaq::cc::PointerType>(castOp.getType()) &&
-          isa<cudaq::cc::PointerType>(castToCast.getType())) {
-        // %4 = cc.cast %3 : (!cc.ptr<T>) -> !cc.ptr<U>
-        // %5 = cc.cast %4 : (!cc.ptr<U>) -> !cc.ptr<V>
-        // ────────────────────────────────────────────
-        // %5 = cc.cast %3 : (!cc.ptr<T>) -> !cc.ptr<V>
-        rewriter.replaceOpWithNewOp<cudaq::cc::CastOp>(castOp, castOp.getType(),
-                                                       castToCast.getValue());
-        return success();
-      }
-    return failure();
+    auto castToCast = castOp.getValue().getDefiningOp<cudaq::cc::CastOp>();
+    if (!castToCast)
+      return failure();
+    if (!isa<cudaq::cc::PointerType>(castOp.getType()))
+      return failure();
+    if (!isa<cudaq::cc::PointerType>(castToCast.getValue().getType()))
+      return failure();
+    auto middleTy = castToCast.getType();
+    if (!isa<cudaq::cc::PointerType, IntegerType>(middleTy))
+      return failure();
+    rewriter.replaceOpWithNewOp<cudaq::cc::CastOp>(castOp, castOp.getType(),
+                                                   castToCast.getValue());
+    return success();
   }
 };
 

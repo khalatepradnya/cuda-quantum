@@ -53,8 +53,7 @@ struct VectorReturn {
 // CHECK:             %[[V_QP2:.*]] = func.call @__quantum__rt__array_get_element_ptr_1d(%[[V_ARR]], %{{.*}})
 // CHECK:             %[[V_Q2:.*]] = cc.load %[[V_QP2]]
 // CHECK:             %[[V_R:.*]] = func.call @__quantum__qis__mz(%[[V_Q2]]){{.*}}!llvm.struct<"Result"
-// CHECK:             %[[V_RI:.*]] = cc.cast %[[V_R]] : {{.*}}-> i64
-// CHECK:             %[[V_RP:.*]] = cc.cast %[[V_RI]] : (i64) -> !cc.ptr<i1>
+// CHECK:             %[[V_RP:.*]] = cc.cast %[[V_R]] : (!cc.ptr<!llvm.struct<"Result", opaque>>) -> !cc.ptr<i1>
 // CHECK:             %[[V_B:.*]] = cc.load %[[V_RP]]
 // CHECK:             %[[V_SP:.*]] = cc.compute_ptr %[[V_BUF]][%{{.*}}]
 // CHECK:             %[[V_BB:.*]] = cc.cast unsigned %[[V_B]] : (i1) -> i8
