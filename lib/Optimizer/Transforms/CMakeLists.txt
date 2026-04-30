@@ -32,6 +32,7 @@ add_cudaq_library(OptTransforms
   DistributedDeviceCall.cpp
   EraseNoise.cpp
   EraseNopCalls.cpp
+  EraseQEC.cpp
   EraseVectorCopyCtor.cpp
   ExpandControlVeqs.cpp
   ExpandMeasurements.cpp
