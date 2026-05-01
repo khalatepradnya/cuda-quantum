@@ -8,32 +8,21 @@
 
 // RUN: cudaq-quake %s | FileCheck %s
 
-// `cudaq::to_integer` accepts a `std::vector<bool>` by spec, but the bridge
-// also accepts the direct `to_integer(mz(qvec))` shape now that `mz` on a
-// register returns `std::vector<measure_handle>`. The intrinsic
-// `__nvqpp_cudaqConvertToInteger` is typed `(!cc.stdvec<i1>) -> i64`, so
-// the bridge inserts a `quake.discriminate` to bridge the type gap before
-// the call; without it the verifier rejects the resulting IR.
+// `cudaq::to_integer` accepts a `std::vector<bool>` by spec. Per
+// `cudaq-spec/proposals/measure_handle.bs` §C++ API L96, calling
+// `cudaq::to_integer(mz(qvec))` directly on a measurement result is
+// rejected by the bridge -- users must explicitly migrate to
+// `cudaq::to_integer(cudaq::to_bools(mz(qvec)))`. This test locks the
+// explicit form's IR shape; the negative path (rejection of the direct
+// form) lives in `test/AST-error/measure_handle.cpp`.
 
 #include <cudaq.h>
 
 void sink(std::int64_t);
 
-struct ToIntegerDirect {
-  void operator()() __qpu__ {
-    cudaq::qvector q(8);
-    sink(cudaq::to_integer(mz(q)));
-  }
-};
-
-// CHECK-LABEL: func.func @__nvqpp__mlirgen__ToIntegerDirect
-// CHECK:         %[[MZ:.*]] = quake.mz %{{.*}} : (!quake.veq<8>) -> !cc.stdvec<!cc.measure_handle>
-// CHECK:         %[[BOOLS:.*]] = quake.discriminate %[[MZ]] : (!cc.stdvec<!cc.measure_handle>) -> !cc.stdvec<i1>
-// CHECK:         %{{.*}} = call @__nvqpp_cudaqConvertToInteger(%[[BOOLS]]) : (!cc.stdvec<i1>) -> i64
-
-// The explicit `to_integer(to_bools(mz(qvec)))` form still works -- the
-// `to_bools` already produces `!cc.stdvec<i1>`, so the bridge does not
-// emit a redundant discriminate.
+// The explicit `to_integer(to_bools(mz(qvec)))` form: `to_bools` already
+// produces `!cc.stdvec<i1>`, so the bridge does not insert a redundant
+// discriminate before the `__nvqpp_cudaqConvertToInteger` call.
 struct ToIntegerExplicit {
   void operator()() __qpu__ {
     cudaq::qvector q(8);

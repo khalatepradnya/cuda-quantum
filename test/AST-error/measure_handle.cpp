@@ -104,3 +104,21 @@ struct BoundaryQkernelParam {
 // to a device-only helper. Positive coverage lives in
 // `test/AST-Quake/const_reference_extension.cpp` (handle-vector parameter)
 // and `test/AST-Quake/measure_handle.cpp` (handle return).
+
+// Spec (`measure_handle.bs` §C++ API L96): `cudaq::to_integer(mz(qvec))`
+// must be migrated explicitly to
+// `cudaq::to_integer(cudaq::to_bools(mz(qvec)))`. The bridge rejects the
+// direct shape rather than silently inserting a discriminate, so the
+// explicit migration cannot regress in user code. Positive coverage of
+// the explicit form lives in
+// `test/AST-Quake/measure_handle_to_integer.cpp`.
+
+void sink(std::int64_t);
+
+struct ToIntegerDirectRejected {
+  void operator()() __qpu__ {
+    cudaq::qvector q(8);
+    // expected-error@+1{{cudaq::to_integer accepts std::vector<bool>; wrap measurement results with cudaq::to_bools(...) first}}
+    sink(cudaq::to_integer(mz(q)));
+  }
+};

@@ -2344,7 +2344,7 @@ bool QuakeBridgeVisitor::VisitCallExpr(clang::CallExpr *x) {
     }
 
     if (funcName == "toInteger" || funcName == "to_integer") {
-      // `to_integer` packs a `std::vector<bool>` LSB-first into an i64
+      // `to_integer` packs a `std::vector<bool>` LSB-first into an i64.
       IRBuilder irBuilder(builder.getContext());
       if (failed(irBuilder.loadIntrinsic(module, cudaqConvertToInteger))) {
         reportClangError(x, mangler, "cannot load cudaqConvertToInteger");
@@ -2361,16 +2361,24 @@ bool QuakeBridgeVisitor::VisitCallExpr(clang::CallExpr *x) {
       if (auto ptrTy = dyn_cast<cc::PointerType>(args[0].getType());
           ptrTy && isa<cc::StdvecType>(ptrTy.getElementType()))
         args[0] = builder.create<cc::LoadOp>(loc, args[0]);
-      // When the user calls `to_integer` on the result of a measurement
-      // (`mz(qvec)` returns `!cc.stdvec<!cc.measure_handle>`), insert a
-      // `quake.discriminate` so the call type-checks. Without this the
-      // verifier rejects the resulting `func.call` and the user sees a
-      // confusing IR-level error far from the source call.
+      // Spec (`measure_handle.bs` §C++ API L96): `cudaq::to_integer(mz(qvec))`
+      // requires explicit migration to
+      // `cudaq::to_integer(cudaq::to_bools(mz(qvec)))`. The bridge does
+      // not silently insert a discriminate -- doing so would hide the
+      // new explicit bulk-discrimination API behind a backward-compat
+      // shim and let the spec-mandated migration regress in user code.
+      // Push a placeholder i64 so the enclosing statement's value stack
+      // stays balanced; returning `false` here would cause the outer
+      // `TraverseStmt` to emit a second, generic "statement not
+      // supported" diagnostic on top of the spec-mandated one.
       if (auto stdvecTy = dyn_cast<cc::StdvecType>(args[0].getType());
           stdvecTy && isa<cc::MeasureHandleType>(stdvecTy.getElementType())) {
-        auto i1StdvecTy = cc::StdvecType::get(builder.getI1Type());
-        args[0] =
-            builder.create<quake::DiscriminateOp>(loc, i1StdvecTy, args[0]);
+        reportClangError(
+            x, mangler,
+            "cudaq::to_integer accepts std::vector<bool>; "
+            "wrap measurement results with cudaq::to_bools(...) first");
+        return pushValue(builder.create<arith::ConstantIntOp>(
+            loc, /*value=*/0, /*width=*/64));
       }
       auto i64Ty = builder.getI64Type();
       return pushValue(
