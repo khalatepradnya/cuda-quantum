@@ -149,3 +149,36 @@ struct AggregateMemberBound {
     (void)b;
   }
 };
+
+// A scalar handle stored only in one branch of an `if` is unbound on the
+// branch that does not store. The dominance check on the scalar-handle
+// alloca rejects the load because the store does not dominate it. This
+// is the "conditional-store" regression from PR #4409 review.
+
+struct ConditionalStoreUnbound {
+  bool operator()(bool cond) __qpu__ {
+    cudaq::qubit q;
+    cudaq::measure_handle h;
+    if (cond)
+      h = mz(q);
+    // expected-error@+1{{discriminating an unbound measure_handle}}
+    bool b = h;
+    return b;
+  }
+};
+
+// Sanity: a scalar handle stored before the conditional read is bound on
+// every path, so the dominance check accepts.
+
+struct ConditionalStoreAfterBind {
+  bool operator()(bool cond) __qpu__ {
+    cudaq::qubit q;
+    cudaq::measure_handle h = mz(q);
+    if (cond) {
+      cudaq::qubit q2;
+      h = mz(q2);
+    }
+    bool b = h;
+    return b;
+  }
+};

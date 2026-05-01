@@ -12,6 +12,7 @@
 #include "cudaq/Optimizer/Builder/Intrinsics.h"
 #include "cudaq/Optimizer/Dialect/CC/CCOps.h"
 #include "cudaq/Optimizer/Dialect/Quake/QuakeOps.h"
+#include "mlir/IR/Dominance.h"
 #include "llvm/Support/Debug.h"
 
 #define DEBUG_TYPE "lower-ast-expr"
@@ -705,7 +706,25 @@ bool QuakeBridgeVisitor::VisitCastExpr(clang::CastExpr *x) {
         // element load, ...) is treated as bound; the host-device
         // boundary check rejects measure_handle arguments at function
         // entry, and other shapes are legitimately bound by
-        // construction at the IR level.
+        // construction at the IR level. The function-argument and
+        // aggregate-per-element gaps are tracked as a followup
+        // (definite-assignment dataflow pass) in
+        // `.cursor/followups.md`.
+        //
+        // Lazy `mlir::DominanceInfo` shared across recursion levels:
+        // we need it for the scalar-handle alloca case below to verify
+        // that a store to the alloca actually dominates the load.
+        std::optional<mlir::DominanceInfo> domCache;
+        auto getDominance =
+            [&](mlir::Operation *anchor) -> mlir::DominanceInfo & {
+          if (!domCache) {
+            if (auto fn = anchor->getParentOfType<func::FuncOp>())
+              domCache.emplace(fn);
+            else
+              domCache.emplace();
+          }
+          return *domCache;
+        };
         std::function<bool(Value, llvm::SmallPtrSetImpl<Value> &)>
             isBoundHandle = [&](Value v,
                                 llvm::SmallPtrSetImpl<Value> &visited) {
@@ -739,19 +758,32 @@ bool QuakeBridgeVisitor::VisitCastExpr(clang::CastExpr *x) {
                 return true;
               // Bound iff at least one store reaches this alloca with a
               // value that is itself bound. For the scalar-handle alloca
-              // we recursively check on the stored value (this catches `h2 =
-              // h;` where `h` is unbound). For aggregate / array allocas we
-              // cannot recursively check usefully -- the stored value may be a
-              // `cc.load` from a *different* element along the same
-              // alloca and chasing it would either loop or give a
-              // misleading result -- so any store anywhere is treated
-              // as binding. Stores can target the alloca directly or
-              // (for arrays / aggregates) flow through
-              // `cc.compute_ptr` / `cc.cast` of the alloca, so we
-              // walk one indirection level.
+              // we additionally require the store to dominate the load,
+              // which catches the `if (cond) h = mz(q); bool b = h;`
+              // case along the cond=false path (otherwise the alloca
+              // sees a store and the check would silently accept the
+              // unbound load). The two-branch shape where every branch
+              // stores (`if (c) h = mz(q1); else h = mz(q2); bool b =
+              // h;`) currently fails this dominance check too -- a
+              // false positive that the user can rewrite around with
+              // `auto h = ...;` once. A proper definite-assignment
+              // dataflow pass would accept that shape; tracked as a
+              // followup. We then recursively check the stored value
+              // (catches `h2 = h;` where `h` is unbound). For aggregate
+              // / array allocas we cannot recursively check usefully --
+              // the stored value may be a `cc.load` from a *different*
+              // element along the same alloca and chasing it would
+              // either loop or give a misleading result -- so any store
+              // anywhere is treated as binding. Stores can target the
+              // alloca directly or (for arrays / aggregates) flow
+              // through `cc.compute_ptr` / `cc.cast` of the alloca, so
+              // we walk one indirection level.
               auto checkStore = [&](cc::StoreOp store) {
                 if (!isScalarHandleAlloca)
                   return true;
+                auto &dom = getDominance(load.getOperation());
+                if (!dom.dominates(store.getOperation(), load.getOperation()))
+                  return false;
                 return isBoundHandle(store.getValue(), visited);
               };
               for (Operation *u : alloca->getUsers()) {
