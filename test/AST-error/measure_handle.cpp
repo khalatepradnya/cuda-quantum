@@ -9,6 +9,7 @@
 // RUN: cudaq-quake -verify %s
 
 #include <cudaq.h>
+#include <functional>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -73,17 +74,33 @@ struct BoundaryPairOfVectorParam {
   }
 };
 
-// Free functions with measure_handle in their signature are device-only
-// helpers. They are not operator() overloads, so the bridge does not emit
-// a boundary error. GenKernelExecution skips them via hasLegalType.
-bool free_handle_param(const std::vector<cudaq::measure_handle> &v) __qpu__ {
-  bool acc = false;
-  for (auto h : v)
-    acc ^= h;
-  return acc;
-}
+// A callable parameter whose inner signature mentions `measure_handle`
+// would still cross the boundary at every invocation: the kernel calls
+// the host-supplied callable with a handle argument. The boundary
+// check must descend into callable signatures to catch this; the plain
+// `containsMeasureHandle` is callable-blind by design (see the
+// `containsMeasureHandleAtBoundary` doc comment in
+// `include/cudaq/Optimizer/Dialect/CC/CCTypes.h`).
 
-cudaq::measure_handle free_handle_return() __qpu__ {
-  cudaq::qubit q;
-  return mz(q);
-}
+struct BoundaryFunctionTypeParam {
+  // expected-error@+1{{measure_handle cannot cross the host-device boundary; entry-point kernels must discriminate first}}
+  void operator()(std::function<void(cudaq::measure_handle)> f) __qpu__ {
+    (void)f;
+  }
+};
+
+struct BoundaryQkernelParam {
+  // expected-error@+1{{measure_handle cannot cross the host-device boundary; entry-point kernels must discriminate first}}
+  void operator()(cudaq::qkernel<void(cudaq::measure_handle)> k) __qpu__ {
+    (void)k;
+  }
+};
+
+// Note: free `__qpu__` functions whose signature mentions `measure_handle`
+// are not diagnosed here. The spec (§Host-Device Boundary) rejects only
+// *entry-point* kernels with a handle in the signature. A free function
+// with a handle parameter or return cannot be an entry point (the host
+// has no way to synthesize a handle), so the bridge silently demotes it
+// to a device-only helper. Positive coverage lives in
+// `test/AST-Quake/const_reference_extension.cpp` (handle-vector parameter)
+// and `test/AST-Quake/measure_handle.cpp` (handle return).

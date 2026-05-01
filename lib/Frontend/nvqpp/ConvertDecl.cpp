@@ -161,9 +161,12 @@ bool QuakeBridgeVisitor::interceptRecordDecl(clang::RecordDecl *x) {
       return pushType(quake::StateType::get(ctx));
     if (name == "pauli_word")
       return pushType(cc::CharspanType::get(ctx));
-    // NB: Accommodating the spec request, to keep the change minimally
-    // invasive to the user make these two equivalent.
-    if (name == "measure_handle" || name == "measure_result")
+    // `cudaq::measure_result` is a `using` alias for `measure_handle` (see
+    // `runtime/cudaq/qis/execution_manager.h`). Clang resolves the typedef
+    // to its underlying `RecordDecl` before this hook is invoked, so the
+    // `name` here is always "measure_handle"; matching on
+    // "measure_result" would be dead code.
+    if (name == "measure_handle")
       return pushType(cc::MeasureHandleType::get(ctx));
     if (name == "qkernel") {
       auto *cts = cast<clang::ClassTemplateSpecializationDecl>(x);

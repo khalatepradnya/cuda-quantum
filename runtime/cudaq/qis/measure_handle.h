@@ -13,7 +13,9 @@
 #ifndef CUDAQ_LIBRARY_MODE
 
 #include <cstdint>
+#include <cstdlib>
 #include <limits>
+#include <type_traits>
 
 namespace cudaq::details {
 /// Tag type used to dispatch the index-taking `measure_handle` constructor,
@@ -40,13 +42,29 @@ namespace cudaq {
 ///
 class measure_handle {
 public:
-  measure_handle() = default;
+  // The body is intentionally explicit (rather than `= default`) so each
+  // translation unit that mentions a `measure_handle` aggregate or array
+  // emits a COMDAT definition of this constructor. The bridge's MLIR-mode
+  // intercept at `VisitCXXConstructExpr` covers the scalar
+  // `measure_handle h;` case by emitting `cc.alloca` directly, but the
+  // bridge does not synthesize per-element ctor calls for arrays
+  // (`measure_handle arr[N];`) or aggregate members (`struct Holder
+  // { measure_handle h; };`) -- instead it emits a single Itanium-mangled
+  // call (`_ZN5cudaq14measure_handleC1Ev`) on the array / struct pointer.
+  // With `= default` the compiler is free to inline that ctor away in
+  // every user TU, leaving the link-time symbol unresolved. The inline
+  // body forces a COMDAT definition.
+  measure_handle() noexcept
+      : index(std::numeric_limits<std::int64_t>::max()) {}
   explicit measure_handle(details::handle_index_t, std::int64_t idx)
       : index(idx) {}
 
-  // Stub implementation, never invoked directly; the bridge intercepts all
-  // coercions to bool and emits `quake.discriminate`
-  operator bool() const { return false; }
+  // The bridge intercepts every `bool` coercion of a `measure_handle` and
+  // emits `quake.discriminate`. This body therefore must never run in a
+  // built kernel; reaching it means the bridge missed an interception
+  // path and the program would otherwise compute on a meaningless `bool`.
+  // Abort instead of returning a quiet wrong answer.
+  operator bool() const { std::abort(); }
 
 private:
   //`index` is the measurement-event identity consumed by `!cc.measure_handle`
@@ -57,6 +75,32 @@ private:
 #endif
   std::int64_t index = std::numeric_limits<std::int64_t>::max();
 };
+
+// The IR alias `!cc.measure_handle` is an `i64`, and `containsMeasureHandle`
+// in the bridge relies on the C++ type having the same in-memory width so
+// host-side ABI marshalling of measurement-bearing structs stays sound.
+static_assert(sizeof(measure_handle) == sizeof(std::int64_t),
+              "cudaq::measure_handle must have the i64 payload width assumed "
+              "by the IR-mode lowering");
+
+// Triviality + standard-layout are also load-bearing for the IR-mode
+// lowering. The bridge marshals values of types that *contain*
+// `measure_handle` (`std::vector`, `std::tuple`, `std::pair`, plain
+// aggregates) by treating each member as a contiguous `i64` payload at
+// the layout-given offset. Any non-trivial copy / move ctor would
+// inject a side-effect at the C++ level that the IR cannot model, and
+// any non-standard-layout member would shift offsets in ways the
+// bridge's offset-of computation does not see. Both properties are
+// stable today by accident of the class shape; pin them with
+// static_asserts so a future reviewer who adds a virtual function or a
+// user-defined copy ctor gets a compile-time error instead of a silent
+// host-device ABI mismatch.
+static_assert(std::is_trivially_copyable_v<measure_handle>,
+              "cudaq::measure_handle must be trivially copyable so the "
+              "bridge can marshal it as a contiguous i64 payload");
+static_assert(std::is_standard_layout_v<measure_handle>,
+              "cudaq::measure_handle must be standard layout so the host-side "
+              "ABI offset of any aggregate member matches the IR lowering");
 
 } // namespace cudaq
 

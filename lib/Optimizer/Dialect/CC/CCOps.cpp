@@ -11,6 +11,7 @@
 #include "cudaq/Optimizer/Dialect/CC/CCDialect.h"
 #include "cudaq/Optimizer/Dialect/Quake/QuakeOps.h"
 #include "llvm/ADT/TypeSwitch.h"
+#include "llvm/IR/DataLayout.h"
 #include "mlir/Dialect/Complex/IR/Complex.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/Utils/IndexingUtils.h"
@@ -462,15 +463,26 @@ LogicalResult cudaq::cc::CastOp::verify() {
 namespace {
 // Fold cast cascades whose endpoints are both pointer types. Two shapes:
 //   - ptr -> ptr -> ptr  (eliminate the intermediate pointer view)
-//   - ptr -> int -> ptr  (eliminate the integer round-trip)
-// `cc.cast` is a value-preserving type-only view, so collapsing either shape
-// to a single `ptr -> ptr` cast is always safe. The integer-round-trip case
-// also matters for the QIR profile pipelines: the discriminate / measurement
-// patterns build `Result* -> i64 -> ... -> ptr<i1>` chains, and the trailing
+//   - ptr -> int -> ptr  (eliminate the integer round-trip), only when the
+//                        integer hop is at least as wide as a pointer
+//
+// `cc.cast` is a value-preserving type-only view, so collapsing the
+// pointer-only shape to a single `ptr -> ptr` cast is always safe. The
+// integer-round-trip shape is value-preserving only when the integer hop
+// holds the full pointer payload; on a 64-bit target, a `ptr -> i32 -> ptr`
+// chain truncates the high 32 bits and the folded `ptr -> ptr` form would
+// observably differ. The width gate is keyed off the module's
+// `DataLayout`-reported pointer size in bits so the same pattern stays
+// correct across 32-bit and 64-bit hosts.
+//
+// The integer-round-trip case is what makes the QIR profile pipelines
+// build legal IR: the discriminate / measurement lowerings emit
+// `Result* -> i64 -> ... -> ptr<i1>` chains, and the trailing
 // `Result* -> i64` lowers to `llvm.ptrtoint`, which the NVQIR profile
 // verifier rejects (only `bitcast`, `inttoptr`, etc. are allow-listed for
 // pointer-typed operands). After this fold + DCE the chain collapses to a
-// single `ptr -> ptr` cast that lowers to `llvm.bitcast`.
+// single `ptr -> ptr` cast that lowers to `llvm.bitcast`. Tests for both
+// shapes live in `test/Transforms/cast_fold.qke`.
 struct FuseCastCascade : public OpRewritePattern<cudaq::cc::CastOp> {
   using OpRewritePattern::OpRewritePattern;
 
@@ -484,8 +496,34 @@ struct FuseCastCascade : public OpRewritePattern<cudaq::cc::CastOp> {
     if (!isa<cudaq::cc::PointerType>(castToCast.getValue().getType()))
       return failure();
     auto middleTy = castToCast.getType();
-    if (!isa<cudaq::cc::PointerType, IntegerType>(middleTy))
+    if (auto intTy = dyn_cast<IntegerType>(middleTy)) {
+      // The fold collapses `ptr -> int -> ptr` to `ptr -> ptr`. That is
+      // value-preserving only when the integer hop holds the full pointer
+      // payload; on a 64-bit target, `ptr -> i32 -> ptr` truncates the high
+      // bits and the folded form would observe a different value.
+      //
+      // CC's `PointerType` does not implement MLIR's `DataLayoutTypeInterface`,
+      // so we cannot use `mlir::DataLayout::getTypeSizeInBits` directly. The
+      // bridge installs the target's data-layout string on the module under
+      // `llvm.data_layout` (`ASTBridge.cpp` `targetDataLayoutAttrName`); parse
+      // it with `llvm::DataLayout` to recover the pointer width. If the
+      // attribute is missing -- isolated lit modules typed by hand -- we
+      // refuse to fold so the rule remains correct in the absence of layout
+      // information.
+      auto module = castOp->getParentOfType<ModuleOp>();
+      auto dlAttr =
+          module ? module->getAttrOfType<StringAttr>(
+                       cudaq::opt::factory::targetDataLayoutAttrName)
+                 : nullptr;
+      if (!dlAttr)
+        return failure();
+      llvm::DataLayout dl(dlAttr.getValue());
+      auto ptrBits = dl.getPointerSizeInBits(/*AS=*/0);
+      if (intTy.getWidth() < ptrBits)
+        return failure();
+    } else if (!isa<cudaq::cc::PointerType>(middleTy)) {
       return failure();
+    }
     rewriter.replaceOpWithNewOp<cudaq::cc::CastOp>(castOp, castOp.getType(),
                                                    castToCast.getValue());
     return success();

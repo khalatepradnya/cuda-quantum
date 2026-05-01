@@ -673,6 +673,19 @@ inline std::int64_t to_integer(const std::string &arg) {
 // In MLIR-compiler mode the AST bridge intercepts this call and lowers it
 // to a vectorized `quake.discriminate` consuming
 // `!cc.stdvec<!cc.measure_handle>` and producing `!cc.stdvec<i1>`.
+//
+// Mode asymmetry: this overload is intentionally MLIR-mode only.
+// Library mode reaches `std::vector<bool>` via element-wise
+// `measure_result::operator bool()` (which calls the runtime
+// `__nvqpp__MeasureResultBoolConversion`) and via
+// `measure_result::to_bool_vector` for the bulk case. In MLIR mode that
+// element-wise route would abort, because `measure_handle::operator
+// bool()` is a stub the bridge is supposed to have lowered away --
+// `to_bools` is the only coercion path the bridge can intercept and
+// lower as a single `quake.discriminate`. The body therefore never
+// runs in a built kernel; reaching it means the bridge missed the
+// interception and aborting is preferable to returning a value
+// computed from `operator bool` on each element.
 inline std::vector<bool>
 to_bools(const std::vector<measure_handle> & /*handles*/) {
   std::abort();

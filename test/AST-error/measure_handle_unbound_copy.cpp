@@ -98,3 +98,54 @@ struct ChainedAssignedBound {
     (void)b;
   }
 };
+
+// Array of handles: discrimination of an uninitialized element must
+// fail; discrimination of any element after at least one element has
+// been bound is conservatively accepted (the check is element-coarse,
+// see `isBoundHandle` in `ConvertExpr.cpp`).
+
+struct ArrayElementUnbound {
+  void operator()() __qpu__ {
+    cudaq::measure_handle hs[2];
+    // expected-error@+1{{discriminating an unbound measure_handle}}
+    bool b = hs[1];
+    (void)b;
+  }
+};
+
+struct ArrayElementBound {
+  void operator()() __qpu__ {
+    cudaq::qubit q;
+    cudaq::measure_handle hs[2];
+    hs[0] = mz(q);
+    bool b = hs[0];
+    (void)b;
+  }
+};
+
+// Aggregate member of measure_handle: same rule. The discrimination of
+// an uninitialized member must fail; once any member has been bound,
+// the check accepts subsequent discrimination (coarse-grained).
+
+struct Holder {
+  cudaq::measure_handle h;
+};
+
+struct AggregateMemberUnbound {
+  void operator()() __qpu__ {
+    Holder holder;
+    // expected-error@+1{{discriminating an unbound measure_handle}}
+    bool b = holder.h;
+    (void)b;
+  }
+};
+
+struct AggregateMemberBound {
+  void operator()() __qpu__ {
+    cudaq::qubit q;
+    Holder holder;
+    holder.h = mz(q);
+    bool b = holder.h;
+    (void)b;
+  }
+};

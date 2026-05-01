@@ -1,0 +1,57 @@
+// ========================================================================== //
+// Copyright (c) 2026 NVIDIA Corporation & Affiliates.                        //
+// All rights reserved.                                                       //
+//                                                                            //
+// This source code and the accompanying materials are made available under   //
+// the terms of the Apache License 2.0 which accompanies this distribution.   //
+// ========================================================================== //
+
+// RUN: cudaq-opt --convert-to-qir-api -canonicalize %s | FileCheck %s
+
+// End-to-end pipeline coverage for the measure_handle QIR lowering. The
+// `--convert-to-qir-api` pass alone already invokes the FuseCastCascade
+// fold via canonicalization patterns, but a downstream pipeline that
+// runs `-canonicalize` after the conversion (e.g. as a follow-up
+// cleanup) must also reach the same fixpoint -- the fold has to be a
+// canonical rewrite, not an artifact of one specific pattern set. This
+// guards against the regression where the second canonicalize run
+// would re-introduce or fail to maintain the `Result* -> ptr<i1>`
+// collapse, leaving the `llvm.ptrtoint` that the NVQIR profile
+// verifier rejects.
+
+module attributes {llvm.data_layout = "e-p:64:64"} {
+
+func.func @scalar_handle_e2e() -> i1 attributes {"cudaq-entrypoint", "cudaq-kernel"} {
+  %0 = quake.alloca !quake.ref
+  %m = quake.mz %0 name "h" : (!quake.ref) -> !cc.measure_handle
+  %b = quake.discriminate %m : (!cc.measure_handle) -> i1
+  return %b : i1
+}
+
+// CHECK-LABEL:   func.func @scalar_handle_e2e() -> i1
+// CHECK:           %[[VAL_Q:.*]] = call @__quantum__rt__qubit_allocate()
+// CHECK:           %[[VAL_R:.*]] = call @__quantum__qis__mz__to__register({{.*}})
+// CHECK-SAME:        -> !cc.ptr<!llvm.struct<"Result", opaque>>
+// CHECK:           %[[VAL_P:.*]] = cc.cast %[[VAL_R]] : (!cc.ptr<!llvm.struct<"Result", opaque>>) -> !cc.ptr<i1>
+// CHECK-NOT:       cc.cast {{.*}} : (!cc.ptr<!llvm.struct<"Result", opaque>>) -> i64
+// CHECK-NOT:       cc.cast {{.*}} : (i64) -> !cc.ptr<i1>
+// CHECK:           %[[VAL_B:.*]] = cc.load %[[VAL_P]] : !cc.ptr<i1>
+// CHECK:           return %[[VAL_B]] : i1
+
+// A sanity-check companion: the same module with a narrow integer hop
+// must NOT collapse. The pattern's gate (intWidth >= pointer width)
+// keeps the chain intact even after the e2e pipeline. This guards
+// against accidentally widening the gate during refactors.
+func.func @scalar_handle_narrow_hop(%arg0: !cc.ptr<i32>) -> !cc.ptr<i1> attributes {"cudaq-kernel"} {
+  %0 = cc.cast %arg0 : (!cc.ptr<i32>) -> i32
+  %1 = cc.cast %0 : (i32) -> !cc.ptr<i1>
+  return %1 : !cc.ptr<i1>
+}
+
+// CHECK-LABEL:   func.func @scalar_handle_narrow_hop(
+// CHECK-SAME:      %[[VAL_0:.*]]: !cc.ptr<i32>) -> !cc.ptr<i1>
+// CHECK:           %[[VAL_1:.*]] = cc.cast %[[VAL_0]] : (!cc.ptr<i32>) -> i32
+// CHECK:           %[[VAL_2:.*]] = cc.cast %[[VAL_1]] : (i32) -> !cc.ptr<i1>
+// CHECK:           return %[[VAL_2]] : !cc.ptr<i1>
+
+}

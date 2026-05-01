@@ -247,15 +247,71 @@ static bool containsMeasureHandleImpl(Type ty,
       if (containsMeasureHandleImpl(m, seen))
         return true;
   }
-  // Note: callable / indirect-callable wrap function types; their inner
-  // signatures are inspected by the kernel-signature validator, not by this
-  // boundary walk.
+  // Rationale: `cc.callable` and `cc.indirect_callable` wrap a function
+  // type. A kernel that takes such a value transports a function pointer
+  // across the host-device boundary, not a `measure_handle` itself; the
+  // wrapped function's inner signature describes what that callee does
+  // at *its own* boundary, and is validated independently when the
+  // bridge enters the callee. Recursing here would conflate "this
+  // kernel takes a handle-using callback" (allowed) with "this kernel
+  // passes a handle directly" (forbidden by the boundary rule).
   return false;
 }
 
 bool containsMeasureHandle(Type ty) {
   llvm::SmallPtrSet<Type, 8> seen;
   return containsMeasureHandleImpl(ty, seen);
+}
+
+static bool containsMeasureHandleAtBoundaryImpl(
+    Type ty, llvm::SmallPtrSetImpl<Type> &seen) {
+  if (!ty || !seen.insert(ty).second)
+    return false;
+  if (isa<MeasureHandleType>(ty))
+    return true;
+  if (auto p = dyn_cast<PointerType>(ty))
+    return containsMeasureHandleAtBoundaryImpl(p.getElementType(), seen);
+  if (auto a = dyn_cast<ArrayType>(ty))
+    return containsMeasureHandleAtBoundaryImpl(a.getElementType(), seen);
+  if (auto v = dyn_cast<StdvecType>(ty))
+    return containsMeasureHandleAtBoundaryImpl(v.getElementType(), seen);
+  if (auto s = dyn_cast<StructType>(ty)) {
+    for (auto m : s.getMembers())
+      if (containsMeasureHandleAtBoundaryImpl(m, seen))
+        return true;
+  }
+  // Unlike `containsMeasureHandle`, the boundary variant also recurses
+  // into callable signatures and bare function types. A kernel taking
+  // `std::function<void(measure_handle)>` -- lowered to
+  // `cc.callable<(!cc.measure_handle) -> ()>` -- transports a
+  // host-defined callable that the kernel invokes with a handle
+  // argument, so the handle would cross the host-device boundary on
+  // every invocation, even though the kernel signature itself does not
+  // syntactically carry a handle. The plain `containsMeasureHandle`
+  // is intentionally callable-blind because the marshaling code at
+  // entry needs to know whether the value being packed is itself a
+  // handle, not whether it ever leads to one.
+  auto recurseFunctionType = [&](FunctionType ft) {
+    for (auto t : ft.getInputs())
+      if (containsMeasureHandleAtBoundaryImpl(t, seen))
+        return true;
+    for (auto t : ft.getResults())
+      if (containsMeasureHandleAtBoundaryImpl(t, seen))
+        return true;
+    return false;
+  };
+  if (auto c = dyn_cast<CallableType>(ty))
+    return recurseFunctionType(c.getSignature());
+  if (auto c = dyn_cast<IndirectCallableType>(ty))
+    return recurseFunctionType(c.getSignature());
+  if (auto f = dyn_cast<FunctionType>(ty))
+    return recurseFunctionType(f);
+  return false;
+}
+
+bool containsMeasureHandleAtBoundary(Type ty) {
+  llvm::SmallPtrSet<Type, 8> seen;
+  return containsMeasureHandleAtBoundaryImpl(ty, seen);
 }
 
 void CCDialect::registerTypes() {

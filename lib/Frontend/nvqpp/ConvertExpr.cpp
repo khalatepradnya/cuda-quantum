@@ -670,8 +670,9 @@ bool QuakeBridgeVisitor::VisitCastExpr(clang::CastExpr *x) {
     // coercion surface on `measure_handle`. Every bool-coercion context lowers
     // through this call site. We emit the single required `quake.discriminate`
     // here so the inserted op's location is the coercion site. The
-    // unbound-handle check catches the canonical `measure_handle h; bool b =
-    // h;` pattern.
+    // unbound-handle check catches the `measure_handle h; bool b = h;`
+    // pattern, including chains routed through copy/move stores between
+    // local allocas.
     if (auto intTy = dyn_cast<IntegerType>(castToTy);
         intTy && intTy.getWidth() == 1) {
       Value handleVal = sub;
@@ -679,26 +680,106 @@ bool QuakeBridgeVisitor::VisitCastExpr(clang::CastExpr *x) {
         if (isa<cc::MeasureHandleType>(ptrTy.getElementType()))
           handleVal = builder.create<cc::LoadOp>(loc, handleVal);
       if (isa<cc::MeasureHandleType>(handleVal.getType())) {
-        if (auto load = handleVal.getDefiningOp<cc::LoadOp>())
-          if (auto alloca = load.getPtrvalue().getDefiningOp<cc::AllocaOp>())
-            if (isa<cc::MeasureHandleType>(alloca.getElementType())) {
-              bool hasStore = false;
-              for (Operation *user : alloca->getUsers())
-                if (isa<cc::StoreOp>(user)) {
-                  hasStore = true;
-                  break;
+        // Returns true if `v` is, transitively, the SSA value of a
+        // measurement op result (`quake.mz/mx/my`). The trace walks
+        // through `cc.load` of a local `cc.alloca` and the stores into
+        // that alloca, modelling the C++ copy/move construction shape
+        //   `measure_handle h2 = h;  // alloca h2; store load(h) -> h2`
+        // which would otherwise look "bound" because the alloca has a
+        // store, even though the stored value itself is unbound.
+        //
+        // Loads through `cc.compute_ptr` / `cc.cast` reach a base alloca
+        // of an array of handles or an aggregate carrying a handle
+        // member (`measure_handle hs[N];`, `Holder h;`). The static
+        // check there is intentionally coarse: any store anywhere into
+        // the base alloca is treated as a binding store, even if it
+        // targets a different element / member than the one being
+        // loaded. The alternative -- per-index / per-member tracking --
+        // requires reasoning about `cc.compute_ptr` indices, which
+        // are SSA values and not always constants. Coarse-grained
+        // checking trades a few false-bound (i.e. silently allowed)
+        // discriminates for guaranteed-no-false-unbound diagnostics on
+        // every code path the user can express in practice.
+        //
+        // Anything we cannot statically trace (function arg, vector
+        // element load, ...) is treated as bound; the host-device
+        // boundary check rejects measure_handle arguments at function
+        // entry, and other shapes are legitimately bound by
+        // construction at the IR level.
+        std::function<bool(Value, llvm::SmallPtrSetImpl<Value> &)>
+            isBoundHandle = [&](Value v,
+                                llvm::SmallPtrSetImpl<Value> &visited) {
+              if (!visited.insert(v).second)
+                return false;
+              if (v.getDefiningOp<quake::MeasurementInterface>())
+                return true;
+              auto load = v.getDefiningOp<cc::LoadOp>();
+              if (!load)
+                return true;
+              // Walk through `cc.compute_ptr` and `cc.cast` to reach the
+              // alloca that owns the storage being loaded.
+              Value ptr = load.getPtrvalue();
+              while (true) {
+                if (auto cp = ptr.getDefiningOp<cc::ComputePtrOp>()) {
+                  ptr = cp.getBase();
+                  continue;
                 }
-              if (!hasStore) {
-                reportClangError(x, mangler,
-                                 "discriminating an unbound measure_handle");
-                // Push a placeholder `i1` so the enclosing statement's value
-                // stack stays balanced. Returning `false` here would cause
-                // the outer `TraverseStmt` to emit a second, generic
-                // "statement not supported" diagnostic.
-                return pushValue(builder.create<arith::ConstantIntOp>(
-                    loc, /*value=*/0, /*width=*/1));
+                if (auto cs = ptr.getDefiningOp<cc::CastOp>()) {
+                  ptr = cs.getValue();
+                  continue;
+                }
+                break;
               }
-            }
+              auto alloca = ptr.getDefiningOp<cc::AllocaOp>();
+              if (!alloca)
+                return true;
+              auto eleTy = alloca.getElementType();
+              bool isScalarHandleAlloca = isa<cc::MeasureHandleType>(eleTy);
+              if (!isScalarHandleAlloca && !cc::containsMeasureHandle(eleTy))
+                return true;
+              // Bound iff at least one store reaches this alloca with a
+              // value that is itself bound. For the scalar-handle alloca
+              // we recurse on the stored value (this catches `h2 = h;`
+              // where `h` is unbound). For aggregate / array allocas
+              // we cannot recurse usefully -- the stored value may be a
+              // `cc.load` from a *different* element along the same
+              // alloca and chasing it would either loop or give a
+              // misleading result -- so any store anywhere is treated
+              // as binding. Stores can target the alloca directly or
+              // (for arrays / aggregates) flow through
+              // `cc.compute_ptr` / `cc.cast` of the alloca, so we
+              // walk one indirection level.
+              auto checkStore = [&](cc::StoreOp store) {
+                if (!isScalarHandleAlloca)
+                  return true;
+                return isBoundHandle(store.getValue(), visited);
+              };
+              for (Operation *u : alloca->getUsers()) {
+                if (auto store = dyn_cast<cc::StoreOp>(u)) {
+                  if (checkStore(store))
+                    return true;
+                  continue;
+                }
+                if (isa<cc::ComputePtrOp, cc::CastOp>(u))
+                  for (Operation *uu : u->getUsers())
+                    if (auto store = dyn_cast<cc::StoreOp>(uu))
+                      if (store.getPtrvalue() == u->getResult(0) &&
+                          checkStore(store))
+                        return true;
+              }
+              return false;
+            };
+        llvm::SmallPtrSet<Value, 4> visited;
+        if (!isBoundHandle(handleVal, visited)) {
+          reportClangError(x, mangler,
+                           "discriminating an unbound measure_handle");
+          // Push a placeholder `i1` so the enclosing statement's value
+          // stack stays balanced. Returning `false` here would cause
+          // the outer `TraverseStmt` to emit a second, generic
+          // "statement not supported" diagnostic.
+          return pushValue(builder.create<arith::ConstantIntOp>(
+              loc, /*value=*/0, /*width=*/1));
+        }
         return pushValue(builder.create<quake::DiscriminateOp>(
             loc, builder.getI1Type(), handleVal));
       }
@@ -2237,6 +2318,28 @@ bool QuakeBridgeVisitor::VisitCallExpr(clang::CallExpr *x) {
         reportClangError(x, mangler, "cannot load cudaqConvertToInteger");
         return false;
       }
+      // The intrinsic signature is `(!cc.stdvec<i1>) -> i64`. The argument
+      // can arrive in either of two shapes from the AST visitor:
+      //   1. `!cc.stdvec<...>` (after lvalue-to-rvalue conversion of the
+      //      named stdvec or for an rvalue from `mz`), or
+      //   2. `!cc.ptr<!cc.stdvec<...>>` (an lvalue that the visitor did
+      //      not lower to an rvalue, e.g. a struct-member access path).
+      // Normalize to the value form first so the `MeasureHandleType`
+      // element-type check below sees the actual stdvec.
+      if (auto ptrTy = dyn_cast<cc::PointerType>(args[0].getType());
+          ptrTy && isa<cc::StdvecType>(ptrTy.getElementType()))
+        args[0] = builder.create<cc::LoadOp>(loc, args[0]);
+      // When the user calls `to_integer` on the result of a measurement
+      // (`mz(qvec)` returns `!cc.stdvec<!cc.measure_handle>`), insert a
+      // `quake.discriminate` so the call type-checks. Without this the
+      // verifier rejects the resulting `func.call` and the user sees a
+      // confusing IR-level error far from the source call.
+      if (auto stdvecTy = dyn_cast<cc::StdvecType>(args[0].getType());
+          stdvecTy && isa<cc::MeasureHandleType>(stdvecTy.getElementType())) {
+        auto i1StdvecTy = cc::StdvecType::get(builder.getI1Type());
+        args[0] =
+            builder.create<quake::DiscriminateOp>(loc, i1StdvecTy, args[0]);
+      }
       auto i64Ty = builder.getI64Type();
       return pushValue(
           builder.create<func::CallOp>(loc, i64Ty, cudaqConvertToInteger, args)
@@ -3349,8 +3452,12 @@ bool QuakeBridgeVisitor::VisitCXXConstructExpr(clang::CXXConstructExpr *x) {
     }
     if (isa<cc::MeasureHandleType>(ctorTy)) {
       // `cudaq::measure_handle` is a value-typed bridge alias for
-      // `!cc.measure_handle`. Copy / move construction is semantically an
-      // SSA-value identity.
+      // `!cc.measure_handle`. The handler returns the loaded SSA value of
+      // the source handle; the enclosing `VarDecl` allocates the
+      // destination slot (`cc.alloca`) and stores the value into it, so
+      // the resulting IR is a load + alloca + store — symmetric with the
+      // `operator=` interception in `VisitCallExpr`. After `mem2reg` this
+      // collapses to direct SSA use.
       Value fromHandle = popValue();
       if (auto ptrTy = dyn_cast<cc::PointerType>(fromHandle.getType()))
         if (isa<cc::MeasureHandleType>(ptrTy.getElementType()))
@@ -3358,6 +3465,19 @@ bool QuakeBridgeVisitor::VisitCXXConstructExpr(clang::CXXConstructExpr *x) {
       return pushValue(fromHandle);
     }
   }
+
+  // Default-construct `cudaq::measure_handle`: produce only the storage
+  // slot. The spec (§Class) defines a default-constructed handle as
+  // `unbound`: any read at a discriminate site is invalid and must be
+  // statically diagnosed where reachable. The C++ default ctor body is
+  // not linked in MLIR mode, so the bridge's generic non-POD ctor path
+  // would emit an unresolved `call @_ZN5cudaq14measure_handleC1Ev(%this)`
+  // that survives into later passes. Allocate the slot here and skip the
+  // call. `VisitVarDecl` recognises the `cc::AllocaOp` result and binds
+  // it directly, leaving the slot uninitialised so the unbound-handle
+  // check in `VisitCXXConversionDecl(operator bool)` fires when reached.
+  if (ctor->isDefaultConstructor() && isa<cc::MeasureHandleType>(ctorTy))
+    return pushValue(builder.create<cc::AllocaOp>(loc, ctorTy));
 
   if (ctor->isCopyConstructor() && ctor->isTrivial() &&
       isa<cc::StructType>(ctorTy)) {

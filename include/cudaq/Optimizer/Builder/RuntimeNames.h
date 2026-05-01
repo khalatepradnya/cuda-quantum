@@ -75,6 +75,15 @@ static constexpr const char callDeviceCallback[] =
 static constexpr const char extractDevPtr[] =
     "__nvqpp__device_extract_device_ptr";
 
+/// Runtime helper invoked by the aborting host stub the bridge emits for
+/// silently-demoted free `__qpu__` functions whose signatures carry
+/// `cudaq::measure_handle`. Such functions cannot have meaningful host glue
+/// (the host has no way to synthesize a handle), so the stub aborts loudly
+/// when reached, replacing what would otherwise be an unresolved-symbol
+/// link error with a clear runtime diagnostic.
+static constexpr const char measureHandleHostBoundaryAbort[] =
+    "__nvqpp_measureHandleHostBoundaryAbort";
+
 // Garbage collection for arrays created during kernel execution.
 static constexpr const char cleanupArrays[] = "__nvqpp_cleanup_arrays";
 

@@ -14,6 +14,8 @@
 #include "cudaq/platform/qpu.h"
 #include "cudaq/runtime/logger/logger.h"
 #include "mlir/IR/BuiltinOps.h"
+#include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <shared_mutex>
 #include <string>
@@ -354,4 +356,22 @@ cudaq::hybridLaunchKernel(const char *kernelName, cudaq::KernelThunkType kernel,
   }
   return platform.launchKernel(kernName, kernel, args, argsSize, resultOffset,
                                rawArgs, qpu_id);
+}
+
+// Aborting host stub helper. The bridge emits a host-side stub for any
+// free `__qpu__` function whose signature carries `cudaq::measure_handle`
+// (such functions cannot legally be entry points -- the host has no way to
+// synthesize a handle -- but they may still be useful as device-only
+// helpers). The stub calls into here so a stray host-side invocation
+// surfaces with a clear runtime diagnostic instead of an unresolved-symbol
+// link error or, worse, a silent miscompile.
+extern "C" void __nvqpp_measureHandleHostBoundaryAbort() {
+  std::fprintf(stderr,
+               "cudaq fatal: a free __qpu__ function whose signature "
+               "carries cudaq::measure_handle was called from host code. "
+               "Such functions are device-only helpers and cannot be "
+               "called from the host (the host has no way to synthesize "
+               "a measure_handle). Discriminate handles before crossing "
+               "the host-device boundary.\n");
+  std::abort();
 }

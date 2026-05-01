@@ -8,6 +8,7 @@
 
 #include "cudaq/Frontend/nvqpp/ASTBridge.h"
 #include "cudaq/Frontend/nvqpp/QisBuilder.h"
+#include "cudaq/Optimizer/Builder/RuntimeNames.h"
 #include "cudaq/Optimizer/Dialect/CC/CCTypes.h"
 #include "cudaq/Optimizer/Dialect/Quake/QuakeTypes.h"
 #include "clang/AST/ParentMapContext.h"
@@ -643,21 +644,92 @@ void ASTBridgeAction::ASTBridgeConsumer::HandleTranslationUnit(
           (!cudaq::ASTBridgeAction::ASTBridgeConsumer::isCustomOpGenerator(
               fdPair.second))) {
         auto hasMH = [](FunctionType ft) {
+          // Use the boundary variant so callables / function types
+          // carrying a handle in their inner signature also trip the
+          // check; the kernel runtime would invoke them with a handle
+          // argument crossing the host-device boundary.
           for (auto ty : ft.getInputs())
-            if (cudaq::cc::containsMeasureHandle(ty))
+            if (cudaq::cc::containsMeasureHandleAtBoundary(ty))
               return true;
           for (auto ty : ft.getResults())
-            if (cudaq::cc::containsMeasureHandle(ty))
+            if (cudaq::cc::containsMeasureHandleAtBoundary(ty))
               return true;
           return false;
         };
         if (hasMH(func.getFunctionType())) {
+          // Spec §"Host-Device Boundary" L135: an entry-point kernel
+          // signature is rejected iff any parameter or return type
+          // transitively contains `cudaq::measure_handle`. Two shapes
+          // reach this branch:
+          //
+          // 1. Functor `operator()`: entry-point by convention. The
+          //    user wrote it intending host invocation, so a handle
+          //    in the signature is a spec violation -- diagnose loudly.
+          //
+          // 2. Free `__qpu__` function (or any non-`operator()` member,
+          //    e.g. a `__qpu__` static method): ambiguous at AST time.
+          //    The function may be called only from other kernels (a
+          //    pure-device helper, e.g. `qubit_values_to_integer` in
+          //    `test/AST-Quake/const_reference_extension.cpp`) or
+          //    intended as an entry point. Since the host genuinely
+          //    cannot synthesize a `measure_handle`, the spec rules
+          //    out the entry-point reading. Silently classify as a
+          //    device-only helper: skip the entry-point attribute and
+          //    host-glue marshaling, leaving the bridge-emitted
+          //    `cudaq-kernel` attribute in place. The host-glue
+          //    fallback path emits an aborting stub so a stray host
+          //    call surfaces as a runtime error rather than a silent
+          //    miscompile (see ASTBridgeAction::ASTBridgeConsumer
+          //    handling of `cudaq-kernel`-without-`cudaq-entrypoint`).
+          //
+          // The functor case is detected by the precise pair
+          // (CXXMethodDecl + OO_Call) rather than the broader
+          // `isa<CXXMethodDecl>` because `__qpu__` member functions
+          // that aren't the call operator (e.g. a static helper or a
+          // named device-helper method on a struct) should follow the
+          // free-function rule too.
           if (auto *md = dyn_cast<clang::CXXMethodDecl>(fdPair.second);
               md && md->getOverloadedOperator() == clang::OO_Call) {
             cudaq::details::reportClangError(
                 fdPair.second, mangler,
                 "measure_handle cannot cross the host-device boundary; "
                 "entry-point kernels must discriminate first");
+            continue;
+          }
+          // Silent-demotion path: emit an aborting host stub so a stray
+          // host-side invocation surfaces as a runtime error rather
+          // than an unresolved-symbol link error. The stub matches the
+          // user's mangled name; its body calls the runtime helper
+          // `__nvqpp_measureHandleHostBoundaryAbort` and returns undef
+          // for any results so the verifier accepts it. The stub does
+          // NOT carry `cudaq-entrypoint`, so
+          // `cudaq::opt::marshal::lookupHostEntryPointFunc` skips it
+          // and later passes leave the abort body in place.
+          addFunctionDecl(fdPair.second, visitor, func.getFunctionType(),
+                          func.getName(), /*isDecl=*/false);
+          auto stubName = visitor.cxxMangledDeclName(fdPair.second);
+          if (auto stub = module->lookupSymbol<func::FuncOp>(stubName);
+              stub && !stub.empty()) {
+            stub.eraseBody();
+            auto *block = stub.addEntryBlock();
+            OpBuilder build(stub.getBody());
+            build.setInsertionPointToStart(block);
+            auto loc = stub.getLoc();
+            auto abortName = cudaq::runtime::measureHandleHostBoundaryAbort;
+            if (!module->lookupSymbol(abortName)) {
+              OpBuilder declBuild(module->getBodyRegion());
+              declBuild.setInsertionPointToEnd(module->getBody());
+              auto abortFn = declBuild.create<func::FuncOp>(
+                  loc, abortName,
+                  declBuild.getFunctionType({}, {}));
+              abortFn.setPrivate();
+            }
+            build.create<func::CallOp>(loc, abortName, TypeRange{},
+                                       ValueRange{});
+            SmallVector<Value> results;
+            for (auto resTy : stub.getFunctionType().getResults())
+              results.push_back(build.create<cc::UndefOp>(loc, resTy));
+            build.create<func::ReturnOp>(loc, results);
           }
           continue;
         }
