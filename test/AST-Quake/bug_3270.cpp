@@ -31,4 +31,3 @@ __qpu__ void foo() {
 // CHECK:           %[[VAL_6:.*]] = quake.mz %[[VAL_3]] name "result%[[VAL_2]]" : (!quake.ref) -> !cc.measure_handle
 // CHECK:           return
 // CHECK:         }
-
