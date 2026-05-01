@@ -1296,6 +1296,45 @@ bool QuakeBridgeVisitor::VisitCallExpr(clang::CallExpr *x) {
     return pushValue(thisVal);
   }
 
+  // Handle `cudaq::measure_handle::operator=` (copy/move assignment).
+  // The synthesized `operator=` is not in the bridge's `cudaq::*` call
+  // dispatch, so without this interception `h2 = h;` falls through to the
+  // generic "unknown function" path and aborts cudaq-quake. Mirror the
+  // copy-ctor lowering at the constructor handler (`isa<MeasureHandleType>
+  // (ctorTy)` below): load the RHS (typically a pointer to a handle) and
+  // store it through the LHS pointer. The expression value of an
+  // assignment in C++ is the LHS lvalue, which we push back as `thisVal`.
+  if (isInClassInNamespace(func, "measure_handle", "cudaq")) {
+    if (auto *md = dyn_cast<clang::CXXMethodDecl>(func);
+        md && md->getOverloadedOperator() == clang::OO_Equal) {
+      Value rhs = popValue();
+      Value thisVal = popValue();
+      // Drop the callee value the visitor pushed for the call. The
+      // standard CXX dispatch path further down (`auto calleeOp =
+      // popValue();` after `lastValues(funcArity)` and the this-ptr
+      // pop) does this routinely; member-call early-intercepts have to
+      // mirror it. Without this pop the callee leaks onto the value
+      // stack, which is invisible in isolation but breaks the moment a
+      // parent expression pops a value below this result -- e.g.
+      // chained `h3 = h2 = h;`, where the outer `=` reads the leaked
+      // inner callee as its `thisVal` and trips the type guard below.
+      [[maybe_unused]] auto calleeOp = popValue();
+      if (auto ptrTy = dyn_cast<cc::PointerType>(rhs.getType()))
+        if (isa<cc::MeasureHandleType>(ptrTy.getElementType()))
+          rhs = builder.create<cc::LoadOp>(loc, rhs);
+      auto thisPtrTy = dyn_cast<cc::PointerType>(thisVal.getType());
+      if (!thisPtrTy ||
+          !isa<cc::MeasureHandleType>(thisPtrTy.getElementType())) {
+        reportClangError(x, mangler,
+                         "measure_handle assignment expects an lvalue "
+                         "measure_handle as its destination");
+        return false;
+      }
+      builder.create<cc::StoreOp>(loc, rhs, thisVal);
+      return pushValue(thisVal);
+    }
+  }
+
   // Handle std::complex member functions
   if (isInClassInNamespace(func, "complex", "std")) {
     auto value = popValue();
