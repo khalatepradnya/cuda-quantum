@@ -511,10 +511,9 @@ struct FuseCastCascade : public OpRewritePattern<cudaq::cc::CastOp> {
       // refuse to fold so the rule remains correct in the absence of layout
       // information.
       auto module = castOp->getParentOfType<ModuleOp>();
-      auto dlAttr =
-          module ? module->getAttrOfType<StringAttr>(
-                       cudaq::opt::factory::targetDataLayoutAttrName)
-                 : nullptr;
+      auto dlAttr = module ? module->getAttrOfType<StringAttr>(
+                                 cudaq::opt::factory::targetDataLayoutAttrName)
+                           : nullptr;
       if (!dlAttr)
         return failure();
       llvm::DataLayout dl(dlAttr.getValue());

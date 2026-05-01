@@ -720,8 +720,7 @@ void ASTBridgeAction::ASTBridgeConsumer::HandleTranslationUnit(
               OpBuilder declBuild(module->getBodyRegion());
               declBuild.setInsertionPointToEnd(module->getBody());
               auto abortFn = declBuild.create<func::FuncOp>(
-                  loc, abortName,
-                  declBuild.getFunctionType({}, {}));
+                  loc, abortName, declBuild.getFunctionType({}, {}));
               abortFn.setPrivate();
             }
             build.create<func::CallOp>(loc, abortName, TypeRange{},

@@ -422,9 +422,9 @@ Value descendThroughDynamicType(Location loc, OpBuilder &builder,
             size = bytes;
 
             // At this point, arg is a known vector of elements of dynamic
-            // type, so walk over the vector and recurse on each element.
-            // `size` is already the proper size of the lengths of each of the
-            // elements in turn.
+            // type, so walk over the vector and recursively check on each
+            // element. `size` is already the proper size of the lengths of each
+            // of the elements in turn.
             builder.create<cudaq::cc::StoreOp>(loc, size, tmp);
             auto ptrTy = cast<cudaq::cc::PointerType>(arg.getType());
             auto strTy = cast<cudaq::cc::StructType>(ptrTy.getElementType());

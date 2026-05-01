@@ -263,8 +263,9 @@ bool containsMeasureHandle(Type ty) {
   return containsMeasureHandleImpl(ty, seen);
 }
 
-static bool containsMeasureHandleAtBoundaryImpl(
-    Type ty, llvm::SmallPtrSetImpl<Type> &seen) {
+static bool
+containsMeasureHandleAtBoundaryImpl(Type ty,
+                                    llvm::SmallPtrSetImpl<Type> &seen) {
   if (!ty || !seen.insert(ty).second)
     return false;
   if (isa<MeasureHandleType>(ty))
@@ -280,8 +281,8 @@ static bool containsMeasureHandleAtBoundaryImpl(
       if (containsMeasureHandleAtBoundaryImpl(m, seen))
         return true;
   }
-  // Unlike `containsMeasureHandle`, the boundary variant also recurses
-  // into callable signatures and bare function types. A kernel taking
+  // Unlike `containsMeasureHandle`, the boundary variant also recursively
+  // checks into callable signatures and bare function types. A kernel taking
   // `std::function<void(measure_handle)>` -- lowered to
   // `cc.callable<(!cc.measure_handle) -> ()>` -- transports a
   // host-defined callable that the kernel invokes with a handle

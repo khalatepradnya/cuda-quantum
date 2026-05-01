@@ -49,17 +49,17 @@ bool isDynamicType(mlir::Type ty);
 bool isDynamicallySizedType(mlir::Type ty);
 
 /// Returns true if and only if \p ty transitively contains `!cc.measure_handle`
-/// in its value representation. Does not recurse into callable signatures or
-/// bare function types -- a callable parameter transports a function pointer,
-/// not a handle value, even when its inner signature mentions handles. Used
-/// by code that needs to know whether the value being moved is itself a
-/// handle (e.g. `cc.alloca`-vs-ctor-call dispatch, marshaling).
+/// in its value representation. Does not recursively check into callable
+/// signatures or bare function types -- a callable parameter transports a
+/// function pointer, not a handle value, even when its inner signature mentions
+/// handles. Used by code that needs to know whether the value being moved is
+/// itself a handle (e.g. `cc.alloca`-vs-constructor-call dispatch, marshaling).
 bool containsMeasureHandle(mlir::Type ty);
 
-/// Like `containsMeasureHandle`, but also recurses into callable signatures
-/// and bare function types. Used at the host-device boundary check, where a
-/// kernel taking `std::function<void(measure_handle)>` must be rejected even
-/// though its top-level parameter type is `cc.callable`, not a handle.
+/// Like `containsMeasureHandle`, but also recursively checks into callable
+/// signatures and bare function types. Used at the host-device boundary check,
+/// where a kernel taking `std::function<void(measure_handle)>` must be rejected
+/// even though its top-level parameter type is `cc.callable`, not a handle.
 bool containsMeasureHandleAtBoundary(mlir::Type ty);
 
 /// Determine the number of hidden arguments, which is 0, 1, or 2.

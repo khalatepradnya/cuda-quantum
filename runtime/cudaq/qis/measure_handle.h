@@ -54,8 +54,7 @@ public:
   // With `= default` the compiler is free to inline that ctor away in
   // every user TU, leaving the link-time symbol unresolved. The inline
   // body forces a COMDAT definition.
-  measure_handle() noexcept
-      : index(std::numeric_limits<std::int64_t>::max()) {}
+  measure_handle() noexcept : index(std::numeric_limits<std::int64_t>::max()) {}
   explicit measure_handle(details::handle_index_t, std::int64_t idx)
       : index(idx) {}
 

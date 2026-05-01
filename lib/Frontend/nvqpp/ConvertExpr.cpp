@@ -739,9 +739,9 @@ bool QuakeBridgeVisitor::VisitCastExpr(clang::CastExpr *x) {
                 return true;
               // Bound iff at least one store reaches this alloca with a
               // value that is itself bound. For the scalar-handle alloca
-              // we recurse on the stored value (this catches `h2 = h;`
-              // where `h` is unbound). For aggregate / array allocas
-              // we cannot recurse usefully -- the stored value may be a
+              // we recursively check on the stored value (this catches `h2 =
+              // h;` where `h` is unbound). For aggregate / array allocas we
+              // cannot recursively check usefully -- the stored value may be a
               // `cc.load` from a *different* element along the same
               // alloca and chasing it would either loop or give a
               // misleading result -- so any store anywhere is treated
