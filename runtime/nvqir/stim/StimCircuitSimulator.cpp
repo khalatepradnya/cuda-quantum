@@ -748,6 +748,14 @@ public:
     return ss.str();
   }
 
+  /// @brief Structured accessor used by the DEM analysis path to avoid the
+  /// text serialise + reparse round-trip. The returned pointer is owned by
+  /// this simulator instance and is valid until `resetCircuitRepr` /
+  /// destruction; consumers must not retain it across simulator switches.
+  const stim::Circuit *getRecordedCircuit() const override {
+    return &recordedCircuit;
+  }
+
   /// @brief Drop the accumulated `recordedCircuit` so the next run starts
   /// with an empty circuit. Used by the analysis-engine override path
   /// (`nvqir::pushAnalysisSimulator`) — DEM analysis must not see residue

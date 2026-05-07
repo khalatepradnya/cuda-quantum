@@ -16,6 +16,7 @@
 ///      `cudaq/analysis/Dem.h` (light) without dragging in Stim.
 
 #include "cudaq/analysis/Dem.h"
+#include "cudaq/analysis/StimDem.h"
 
 #include "common/ExecutionContext.h"
 #include "common/NoiseModel.h"
@@ -64,13 +65,16 @@ ScopedAnalysisSimulator::~ScopedAnalysisSimulator() {
 }
 
 // ===========================================================================
-// runComputeDem — type-erased core of the templated computeDem entry point
+// runRecordDem — Option C core: drives the kernel through the Stim analysis
+//                simulator and returns the resulting DEM by value, with no
+//                text serialisation between the recorder and the caller.
 // ===========================================================================
 
-DemData runComputeDem(const std::string &kernelName,
-                      cudaq::quantum_platform &platform,
-                      const cudaq::noise_model *noise,
-                      const std::function<void()> &wrappedKernel) {
+stim::DetectorErrorModel
+runRecordDem(const std::string &kernelName,
+             cudaq::quantum_platform &platform,
+             const cudaq::noise_model *noise,
+             const std::function<void()> &wrappedKernel) {
   // FIXME(runtime-team): the steps below are the boilerplate every analysis
   // engine will repeat (sim override + ExecutionContext + post-exec
   // extraction). The policy-based dispatch direction would push this into a
@@ -86,48 +90,58 @@ DemData runComputeDem(const std::string &kernelName,
 
   // Run the kernel. The simulator records the full circuit including
   // DETECTOR / OBSERVABLE_INCLUDE instructions emitted by the qec.* ops.
-  // The "dem" entry in the withPolicy registry dispatches to dem_policy{},
-  // which has no custom finalize overload — the CPO falls through to the
-  // default no-op. This is intentional: DEM extraction happens below,
-  // after the kernel finishes, because the Stim simulator's
-  // recordedCircuit survives finalization.
   platform.with_execution_context(ctx, wrappedKernel);
 
-  // Extract the recorded Stim circuit from the (still-active) analysis
-  // simulator. The ScopedAnalysisSimulator guard keeps Stim as the active
-  // simulator until this function returns.
+  // Read the structured `stim::Circuit` directly off the (still-active)
+  // analysis simulator -- no text serialisation, no re-parse. The
+  // ScopedAnalysisSimulator guard keeps Stim as the active simulator until
+  // this function returns; the recordedCircuit storage is owned by Stim and
+  // valid for the lifetime of the active simulator instance, which is
+  // longer than this function call.
   nvqir::CircuitSimulator *sim = nvqir::getCircuitSimulatorInternal();
-  std::string repr = sim->getCircuitRepr();
-  if (repr.empty())
+  const stim::Circuit *recorded = sim->getRecordedCircuit();
+  if (!recorded)
     throw std::runtime_error(
-        "cudaq::analysis::computeDem: simulator '" + sim->name() +
-        "' produced an empty circuit repr. DEM analysis requires a "
-        "Stim-format recorded circuit (only the Stim NVQIR backend supports "
-        "this today).");
+        "cudaq::analysis::record_dem: simulator '" + sim->name() +
+        "' did not provide a structured recorded circuit. DEM analysis "
+        "requires a Stim-format recorded circuit (only the Stim NVQIR "
+        "backend supports this today).");
 
-  // Parse the recorded Stim circuit and run Stim's error analyzer to obtain
-  // the DEM. The defaults below match Stim's CLI defaults except for
-  // `decompose_errors`, which we leave off so the v1 demo emits the raw DEM;
-  // CUDA-QX may set it to true when consuming the DEM for matching decoders.
-  stim::Circuit circuit(repr.c_str());
+  // Run Stim's error analyzer directly on the structured circuit. Defaults
+  // match Stim's CLI defaults except for `decompose_errors`, which we leave
+  // off so the raw DEM is emitted; CUDA-QX may set it to true when consuming
+  // the DEM for matching decoders.
+  (void)kernelName;
+  return stim::ErrorAnalyzer::circuit_to_detector_error_model(
+      *recorded,
+      /*decompose_errors=*/false,
+      /*fold_loops=*/false,
+      /*allow_gauge_detectors=*/false,
+      /*approximate_disjoint_errors_threshold=*/0,
+      /*ignore_decomposition_failures=*/false,
+      /*block_decomposition_from_introducing_remnant_edges=*/false);
+}
+
+// ===========================================================================
+// runComputeDem — Option A wire-protocol shim: calls runRecordDem and
+//                 packages the DEM as text + counts in DemData. Kept for
+//                 backwards compatibility with the existing Option A
+//                 prototype while Option C is being prototyped end-to-end.
+// ===========================================================================
+
+DemData runComputeDem(const std::string &kernelName,
+                      cudaq::quantum_platform &platform,
+                      const cudaq::noise_model *noise,
+                      const std::function<void()> &wrappedKernel) {
   stim::DetectorErrorModel dem =
-      stim::ErrorAnalyzer::circuit_to_detector_error_model(
-          circuit,
-          /*decompose_errors=*/false,
-          /*fold_loops=*/false,
-          /*allow_gauge_detectors=*/false,
-          /*approximate_disjoint_errors_threshold=*/0,
-          /*ignore_decomposition_failures=*/false,
-          /*block_decomposition_from_introducing_remnant_edges=*/false);
+      runRecordDem(kernelName, platform, noise, wrappedKernel);
 
   DemData result;
   std::stringstream demStream;
   demStream << dem;
   result.demText = demStream.str();
-  result.numDetectors = circuit.count_detectors();
-  result.numObservables = circuit.count_observables();
-
-  (void)kernelName;
+  result.numDetectors = dem.count_detectors();
+  result.numObservables = dem.count_observables();
   return result;
 }
 

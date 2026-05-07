@@ -30,6 +30,14 @@
 #include <string>
 #include <utility>
 
+// Forward declaration so the simulator base API can return a structured Stim
+// recorded-circuit pointer without dragging Stim's headers into every
+// translation unit that consumes `CircuitSimulator`. The full type lives in
+// `tpls/Stim/src/stim/circuit/circuit.h`.
+namespace stim {
+struct Circuit;
+} // namespace stim
+
 namespace nvqir {
 
 enum class QubitOrdering { lsb, msb };
@@ -422,6 +430,15 @@ public:
   /// reachable via the extern "C" `__nvqir__getCircuitRepr` function; not part
   /// of the public CUDA-Q API.
   virtual std::string getCircuitRepr() const { return ""; }
+
+  /// @brief Return a pointer to the backend's structured recorded-circuit
+  /// object, or nullptr if not applicable. Forward-declared so the base
+  /// class header does not depend on Stim's headers; consumers that hold a
+  /// non-null pointer must include `stim.h` and know the backend is Stim
+  /// (see `name() == "stim"`). Used by the DEM analysis path
+  /// (`cudaq::analysis::record_dem`) to avoid the text round-trip that
+  /// `getCircuitRepr` + `stim::Circuit(...)` would impose.
+  virtual const stim::Circuit *getRecordedCircuit() const { return nullptr; }
 
   /// @brief Reset any state backing `getCircuitRepr` so a subsequent run
   /// starts from an empty recorded circuit. Default no-op; backends that
