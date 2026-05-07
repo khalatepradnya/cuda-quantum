@@ -21,7 +21,6 @@ def QECDialect : Dialect {
     QEC annotations a dedicated namespace.
   }];
   let cppNamespace = "::qec";
-  let useFoldAPI = kEmitFoldAdaptorFolder;
 }
 
 #endif // CUDAQ_OPTIMIZER_DIALECT_QEC_IR_QEC

@@ -2510,7 +2510,7 @@ bool QuakeBridgeVisitor::VisitCallExpr(clang::CallExpr *x) {
       if (auto pt = dyn_cast<cudaq::cc::PointerType>(v.getType()))
         if (isa<cudaq::cc::MeasureHandleType, cudaq::cc::StdvecType>(
                 pt.getElementType()))
-          return builder.create<cudaq::cc::LoadOp>(loc, v);
+          return cudaq::cc::LoadOp::create(builder, loc, v);
       return v;
     };
     auto isMeasureHandleOrVec = [](Type ty) {
@@ -2531,7 +2531,7 @@ bool QuakeBridgeVisitor::VisitCallExpr(clang::CallExpr *x) {
                            "or std::vector<cudaq::measure_handle>");
         ops.push_back(v);
       }
-      builder.create<qec::DetectorOp>(loc, ops);
+      qec::DetectorOp::create(builder, loc, ops);
       return true;
     }
     if (funcName == "logical_observable") {
@@ -2557,8 +2557,8 @@ bool QuakeBridgeVisitor::VisitCallExpr(clang::CallExpr *x) {
               "or std::vector<cudaq::measure_handle>");
         ops.push_back(v);
       }
-      builder.create<qec::LogicalObservableOp>(
-          loc, ops, builder.getI64IntegerAttr(obsIdx));
+      qec::LogicalObservableOp::create(builder, loc, ops,
+                                       builder.getI64IntegerAttr(obsIdx));
       return true;
     }
     if (funcName == "detectors_vectorized" && args.size() == 2) {
@@ -2574,7 +2574,7 @@ bool QuakeBridgeVisitor::VisitCallExpr(clang::CallExpr *x) {
                            "detectors_vectorized arguments must each be a "
                            "std::vector<cudaq::measure_handle>");
       }
-      builder.create<qec::DetectorsVectorizedOp>(loc, prev, curr);
+      qec::DetectorsVectorizedOp::create(builder, loc, prev, curr);
       return true;
     }
 

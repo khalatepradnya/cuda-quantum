@@ -2174,8 +2174,9 @@ ensureQECRuntimeFuncDecl(ModuleOp module, ConversionPatternRewriter &rewriter,
 // `cudaq::cg::getResultType` directly) so that opaque-pointer mode tracks
 // the rest of the conversion. `convertType` is non-const because it caches
 // resolved types internally; the callers pass `getTypeConverter()` which
-// returns a mutable pointer in MLIR's OpConversionPattern.
-static Type getQIRResultPtrType(TypeConverter *converter, MLIRContext *ctx) {
+// returns `const TypeConverter*` since LLVM 22.
+static Type getQIRResultPtrType(const TypeConverter *converter,
+                                MLIRContext *ctx) {
   return converter->convertType(quake::MeasureType::get(ctx));
 }
 
