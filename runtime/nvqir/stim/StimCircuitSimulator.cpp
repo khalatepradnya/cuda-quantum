@@ -748,6 +748,19 @@ public:
     return ss.str();
   }
 
+  /// @brief Return the recorded circuit by const pointer for the DEM
+  /// analysis path (`cudaq::analysis::compute_dem`), which feeds it directly
+  /// to `stim::ErrorAnalyzer::circuit_to_detector_error_model` and avoids
+  /// the text round-trip that `getCircuitRepr` would impose.
+  const stim::Circuit *getRecordedCircuit() const override {
+    return &recordedCircuit;
+  }
+
+  /// @brief Drop the accumulated `recordedCircuit` so the next analysis run
+  /// starts with an empty circuit. Wired into the DEM scope's `on_enter`
+  /// hook so a freshly entered scope cannot see residue from a prior run.
+  void resetCircuitRepr() override { recordedCircuit = stim::Circuit(); }
+
   bool isStateVectorSimulator() const override { return false; }
 
   std::string name() const override { return "stim"; }
