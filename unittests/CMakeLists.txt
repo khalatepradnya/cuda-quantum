@@ -72,7 +72,6 @@ set(CUDAQ_RUNTIME_TEST_SOURCES
   integration/tracer_tester.cpp
   integration/gate_library_tester.cpp
   integration/analysis_scope_tester.cpp
-  integration/compute_dem_tester.cpp
 )
 
 # Make it so we can get function symbols
@@ -151,7 +150,7 @@ endmacro()
 # We will always have the QPP backend, create a tester for it
 create_tests_with_backend(qpp backends/QPPTester.cpp)
 create_tests_with_backend(dm backends/QPPDMTester.cpp)
-create_tests_with_backend(stim backends/StimTester.cpp)
+create_tests_with_backend(stim "backends/StimTester.cpp;integration/compute_dem_tester.cpp")
 
 if (cuStateVec_FOUND)
   find_program(NVIDIA_SMI "nvidia-smi")
