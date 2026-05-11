@@ -427,14 +427,14 @@ public:
   /// @brief Return a string representation of the recorded circuit, including
   /// gates, measurements, noise, detectors, and observables. Only meaningful
   /// for backends that record circuits (e.g., Stim). Internal/test backdoor
-  /// reachable via the extern "C" `__nvqir__getCircuitRepr` function; not part
+  /// reachable via the `extern "C" __nvqir__getCircuitRepr` function; not part
   /// of the public CUDA-Q API.
   virtual std::string getCircuitRepr() const { return ""; }
 
-  /// @brief Return a pointer to the backend's structured recorded-circuit
-  /// object, or nullptr if not applicable. The base API hides Stim behind
+  /// @brief Return a pointer to the target's structured recorded-circuit
+  /// object, or `nullptr` if not applicable. The base API hides Stim behind
   /// a forward declaration so non-DEM consumers do not pull in Stim headers;
-  /// only the DEM analysis path (`cudaq::analysis::compute_dem`) dereferences
+  /// only the DEM analysis path (`cudaq::analysis::compute_dem`) de-references
   /// the pointer, after checking the active simulator's name. Lifetime
   /// matches the simulator instance; consumers must finish reading before
   /// the owning `nvqir::AnalysisScope` is destroyed.
@@ -450,7 +450,7 @@ public:
   /// @brief Return the chronological index of the most recent measurement.
   /// Used by the handle-form `mz` runtime path to populate the kernel-level
   /// `measure_handle` value with an index that aligns with the simulator's
-  /// `rec[-N]` lookback math (so `qec.detector(handle)` references the
+  /// `rec[-N]` look-back math (so `qec.detector(handle)` references the
   /// matching `M` instruction in the recorded circuit). Returns -1 when no
   /// measurement has been performed; backends that don't track an absolute
   /// measurement count must override.
