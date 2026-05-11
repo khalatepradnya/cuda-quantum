@@ -72,6 +72,7 @@ set(CUDAQ_RUNTIME_TEST_SOURCES
   integration/tracer_tester.cpp
   integration/gate_library_tester.cpp
   integration/analysis_scope_tester.cpp
+  integration/compute_dem_tester.cpp
 )
 
 # Make it so we can get function symbols
@@ -117,7 +118,7 @@ macro (create_tests_with_backend NVQIR_BACKEND EXTRA_BACKEND_TESTER)
     target_include_directories(${TEST_EXE_NAME} PRIVATE
       ${CMAKE_SOURCE_DIR}/runtime/nvqir/stim
       ${CMAKE_SOURCE_DIR}/tpls/Stim/src)
-    target_link_libraries(${TEST_EXE_NAME} PRIVATE libstim)
+    target_link_libraries(${TEST_EXE_NAME} PRIVATE libstim cudaq-analysis)
   endif()
   if (${NVQIR_BACKEND} STREQUAL "tensornet")
     target_compile_definitions(${TEST_EXE_NAME} PRIVATE -DCUDAQ_BACKEND_TENSORNET -DCUDAQ_SIMULATION_SCALAR_FP64)
