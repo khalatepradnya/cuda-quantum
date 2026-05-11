@@ -30,6 +30,14 @@
 #include <string>
 #include <utility>
 
+// Forward declaration so the simulator base API can return a structured Stim
+// recorded-circuit pointer without dragging Stim's headers into every
+// translation unit that consumes `CircuitSimulator`. The full type lives in
+// `tpls/Stim/src/stim/circuit/circuit.h`.
+namespace stim {
+struct Circuit;
+} // namespace stim
+
 namespace nvqir {
 
 enum class QubitOrdering { lsb, msb };
@@ -422,6 +430,22 @@ public:
   /// reachable via the extern "C" `__nvqir__getCircuitRepr` function; not part
   /// of the public CUDA-Q API.
   virtual std::string getCircuitRepr() const { return ""; }
+
+  /// @brief Return a pointer to the backend's structured recorded-circuit
+  /// object, or nullptr if not applicable. The base API hides Stim behind
+  /// a forward declaration so non-DEM consumers do not pull in Stim headers;
+  /// only the DEM analysis path (`cudaq::analysis::compute_dem`) dereferences
+  /// the pointer, after checking the active simulator's name. Lifetime
+  /// matches the simulator instance; consumers must finish reading before
+  /// the owning `nvqir::AnalysisScope` is destroyed.
+  virtual const stim::Circuit *getRecordedCircuit() const { return nullptr; }
+
+  /// @brief Drop any state backing `getCircuitRepr` / `getRecordedCircuit`
+  /// so the next analysis run starts from an empty circuit. Default no-op;
+  /// the Stim backend overrides to clear `recordedCircuit`. Wired into the
+  /// `on_enter` hook of `cudaq::analysis::dem::make_scope` so each DEM run
+  /// sees only its own kernel.
+  virtual void resetCircuitRepr() {}
 
   /// @brief Return the chronological index of the most recent measurement.
   /// Used by the handle-form `mz` runtime path to populate the kernel-level
