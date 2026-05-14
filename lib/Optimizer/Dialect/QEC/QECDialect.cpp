@@ -13,7 +13,7 @@ using namespace mlir;
 
 #include "cudaq/Optimizer/Dialect/QEC/QECDialect.cpp.inc"
 
-void qec::QECDialect::initialize() {
+void cudaq::qec::QECDialect::initialize() {
   addOperations<
 #define GET_OP_LIST
 #include "cudaq/Optimizer/Dialect/QEC/QECOps.cpp.inc"

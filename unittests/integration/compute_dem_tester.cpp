@@ -8,7 +8,7 @@
 
 #include "CUDAQTestUtils.h"
 #include "cudaq/analysis/dem.h"
-#include "cudaq/analysis/scope.h"
+#include "nvqir/AnalysisScope.h"
 #include "nvqir/CircuitSimulator.h"
 
 #include <stdexcept>
@@ -28,7 +28,7 @@ CUDAQ_TEST(ComputeDemTester, trivialKernelEmptyDem) {
   auto dem = cudaq::analysis::compute_dem(trivialKernel);
   EXPECT_EQ(dem.count_detectors(), 0u);
   EXPECT_EQ(dem.count_observables(), 0u);
-  EXPECT_FALSE(cudaq::analysis::scope::is_active());
+  EXPECT_FALSE(nvqir::AnalysisScope::is_active());
 }
 
 // TODO(followups.md "compute_dem MLIR-mode test"): a richer positive-path
@@ -42,7 +42,7 @@ CUDAQ_TEST(ComputeDemTester, trivialKernelEmptyDem) {
 // via a lit test or an MLIR-mode integration test once one exists for QEC.
 
 CUDAQ_TEST(ComputeDemTester, releasesScopeOnException) {
-  EXPECT_FALSE(cudaq::analysis::scope::is_active());
+  EXPECT_FALSE(nvqir::AnalysisScope::is_active());
 
   auto throwingKernel = []() __qpu__ {
     cudaq::qubit q;
@@ -53,9 +53,9 @@ CUDAQ_TEST(ComputeDemTester, releasesScopeOnException) {
   EXPECT_THROW(cudaq::analysis::compute_dem(throwingKernel),
                std::runtime_error);
 
-  // RAII on `scope` should have released the slot even though the body
-  // threw.
-  EXPECT_FALSE(cudaq::analysis::scope::is_active());
+  // RAII on the analysis scope should have released the slot even though
+  // the body threw.
+  EXPECT_FALSE(nvqir::AnalysisScope::is_active());
 
   // A subsequent compute_dem on the same thread must work.
   auto trivialKernel = []() __qpu__ {
@@ -68,24 +68,24 @@ CUDAQ_TEST(ComputeDemTester, releasesScopeOnException) {
 }
 
 CUDAQ_TEST(ComputeDemTester, demScopeIsActive) {
-  EXPECT_FALSE(cudaq::analysis::scope::is_active());
+  EXPECT_FALSE(nvqir::AnalysisScope::is_active());
   {
     auto s = cudaq::analysis::dem::make_scope();
-    EXPECT_TRUE(cudaq::analysis::scope::is_active());
+    EXPECT_TRUE(nvqir::AnalysisScope::is_active());
     EXPECT_EQ(s.name(), "dem");
     EXPECT_EQ(s.simulator().name(), "stim");
   }
-  EXPECT_FALSE(cudaq::analysis::scope::is_active());
+  EXPECT_FALSE(nvqir::AnalysisScope::is_active());
 }
 
 CUDAQ_TEST(ComputeDemTester, demScopeNestedThrows) {
   auto outer = cudaq::analysis::dem::make_scope();
-  EXPECT_TRUE(cudaq::analysis::scope::is_active());
+  EXPECT_TRUE(nvqir::AnalysisScope::is_active());
 
   EXPECT_THROW(cudaq::analysis::dem::make_scope(), std::runtime_error);
 
   // Outer scope is still the active one after the failed nest attempt.
-  EXPECT_TRUE(cudaq::analysis::scope::is_active());
+  EXPECT_TRUE(nvqir::AnalysisScope::is_active());
 }
 
 CUDAQ_TEST(ComputeDemTester, makeScopeRejectsUnknownPlugin) {
@@ -94,7 +94,7 @@ CUDAQ_TEST(ComputeDemTester, makeScopeRejectsUnknownPlugin) {
   // rather than a null-deref later in `compute_dem`.
   EXPECT_THROW(cudaq::analysis::dem::make_scope("nonexistent_plugin"),
                std::runtime_error);
-  EXPECT_FALSE(cudaq::analysis::scope::is_active());
+  EXPECT_FALSE(nvqir::AnalysisScope::is_active());
 }
 
 #endif // CUDAQ_BACKEND_STIM

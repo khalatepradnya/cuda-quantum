@@ -40,7 +40,7 @@ namespace dem {
 ///                     to "stim", which is the only backend that produces a
 ///                     non-null `getRecordedCircuit()` today. Custom plugins
 ///                     may be substituted as long as they implement the
-///                     `detector` / `logical_observable` / recorded-circuit
+///                     `detector` / `observable` / recorded-circuit
 ///                     virtuals on `nvqir::CircuitSimulator`.
 ///
 /// Throws `std::runtime_error` if an analysis scope is already active on the

@@ -11,7 +11,7 @@
 
 using namespace mlir;
 
-LogicalResult qec::DetectorsVectorizedOp::verify() {
+LogicalResult cudaq::qec::DetectorsOp::verify() {
   // Note: cc::StdvecType is dynamically sized at the type level, so any size
   // mismatch between prev and curr must be caught at runtime. The TableGen
   // operand constraint already enforces the element-type invariant; we

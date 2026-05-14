@@ -23,8 +23,8 @@ namespace cudaq::opt {
 using namespace mlir;
 
 /// \file
-/// Strip QEC annotation ops (`qec.detector`, `qec.logical_observable`,
-/// `qec.detectors_vectorized`) from the IR. These ops are inert from a
+/// Strip QEC annotation ops (`qec.detector`, `qec.observable`,
+/// `qec.detectors`) from the IR. These ops are inert from a
 /// quantum-mechanical perspective: they declare relationships among prior
 /// measurement results for analysis engines (DEM via Stim) but emit no gates
 /// or measurements. Hardware targets and simulators that do not implement the
@@ -60,9 +60,9 @@ public:
     LLVM_DEBUG(llvm::dbgs() << "Before QEC erasure:\n" << *op << "\n\n");
     auto *ctx = &getContext();
     RewritePatternSet patterns(ctx);
-    patterns.insert<EraseQECOpPattern<qec::DetectorOp>,
-                    EraseQECOpPattern<qec::LogicalObservableOp>,
-                    EraseQECOpPattern<qec::DetectorsVectorizedOp>>(ctx);
+    patterns.insert<EraseQECOpPattern<cudaq::qec::DetectorOp>,
+                    EraseQECOpPattern<cudaq::qec::ObservableOp>,
+                    EraseQECOpPattern<cudaq::qec::DetectorsOp>>(ctx);
     if (failed(applyPatternsAndFoldGreedily(op, std::move(patterns))))
       signalPassFailure();
     LLVM_DEBUG(llvm::dbgs() << "After QEC erasure:\n" << *op << "\n\n");

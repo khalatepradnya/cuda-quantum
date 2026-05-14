@@ -20,7 +20,7 @@ def QECDialect : Dialect {
     the Quake dialect to keep Quake focused on circuit semantics while giving
     QEC annotations a dedicated namespace.
   }];
-  let cppNamespace = "::qec";
+  let cppNamespace = "cudaq::qec";
 }
 
 #endif // CUDAQ_OPTIMIZER_DIALECT_QEC_IR_QEC

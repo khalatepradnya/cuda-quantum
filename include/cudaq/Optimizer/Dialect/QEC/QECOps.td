@@ -36,7 +36,7 @@ def QEC_DetectorOp : QECOp<"detector"> {
   }];
 }
 
-def QEC_DetectorsVectorizedOp : QECOp<"detectors_vectorized"> {
+def QEC_DetectorsOp : QECOp<"detectors"> {
   let summary = "Declare N detectors by pairing prev and curr measurement vectors.";
   let description = [{
     Given two `!cc.stdvec<!cc.measure_handle>` collections of measurement
@@ -55,7 +55,7 @@ def QEC_DetectorsVectorizedOp : QECOp<"detectors_vectorized"> {
   }];
 }
 
-def QEC_LogicalObservableOp : QECOp<"logical_observable"> {
+def QEC_ObservableOp : QECOp<"observable"> {
   let summary = "Declare a logical observable over measurement results.";
   let description = [{
     Declares a logical observable as a binary sum of measurement results.

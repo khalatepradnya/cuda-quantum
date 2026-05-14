@@ -464,15 +464,13 @@ public:
 
   /// @brief Declare N detectors element-wise over two measurement-index
   /// arrays of equal length (cross-round detectors).
-  virtual void detectors_vectorized(const std::int64_t *prev,
-                                    const std::int64_t *curr,
-                                    std::size_t count) {}
+  virtual void detectors(const std::int64_t *prev, const std::int64_t *curr,
+                         std::size_t count) {}
 
   /// @brief Declare a logical observable over one or more measurement
   /// indices, tagged with @p observable_index.
-  virtual void logical_observable(const std::int64_t *indices,
-                                  std::size_t count,
-                                  std::size_t observable_index = 0) {}
+  virtual void observable(const std::int64_t *indices, std::size_t count,
+                          std::size_t observable_index = 0) {}
 
   /// @brief Return the name of this CircuitSimulator
   virtual std::string name() const = 0;

@@ -819,9 +819,9 @@ void __quantum__qis__trap(std::int64_t code) {
 
 // QEC declarations lowered from the `quake.qec` dialect.
 //
-// The compiler lowers `quake.qec.{detector,logical_observable,
-// detectors_vectorized}` to calls into these functions, passing measurement
-// handles as `Result**` arrays in the QIR ABI. In compiled QIR, each `Result*`
+// The compiler lowers `quake.qec.{detector,observable,detectors}` to calls
+// into these functions, passing measurement handles as `Result**` arrays in
+// the QIR ABI. In compiled QIR, each `Result*`
 // is `inttoptr(measurement_index)`, so `reinterpret_cast<std::intptr_t>` round-
 // trips it to the chronological index assigned at QIR generation time. The
 // runtime forwards integer indices to the simulator's QEC virtuals; backends
@@ -846,10 +846,10 @@ void __quantum__qis__detector_from_results(Result **results,
                                                  indices.size());
 }
 
-void __quantum__qis__detectors_vectorized_from_arrays(Result **prev_results,
-                                                      std::int64_t prev_count,
-                                                      Result **curr_results,
-                                                      std::int64_t curr_count) {
+void __quantum__qis__detectors_from_arrays(Result **prev_results,
+                                           std::int64_t prev_count,
+                                           Result **curr_results,
+                                           std::int64_t curr_count) {
   // The QIR conversion pattern delivers the prev/curr arrays as separate
   // (data, size) pairs because `cc.stdvec` carries no static size. Length
   // agreement is enforced here at the simulator boundary.
@@ -857,14 +857,15 @@ void __quantum__qis__detectors_vectorized_from_arrays(Result **prev_results,
     return;
   auto prev = resultArrayToIndices(prev_results, prev_count);
   auto curr = resultArrayToIndices(curr_results, curr_count);
-  nvqir::getCircuitSimulatorInternal()->detectors_vectorized(
-      prev.data(), curr.data(), prev.size());
+  nvqir::getCircuitSimulatorInternal()->detectors(prev.data(), curr.data(),
+                                                  prev.size());
 }
 
-void __quantum__qis__logical_observable_from_results(
-    Result **results, std::int64_t count, std::int64_t observable_index) {
+void __quantum__qis__observable_from_results(Result **results,
+                                             std::int64_t count,
+                                             std::int64_t observable_index) {
   auto indices = resultArrayToIndices(results, count);
-  nvqir::getCircuitSimulatorInternal()->logical_observable(
+  nvqir::getCircuitSimulatorInternal()->observable(
       indices.data(), indices.size(),
       static_cast<std::size_t>(observable_index));
 }

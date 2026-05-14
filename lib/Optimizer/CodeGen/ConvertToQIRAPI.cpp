@@ -2233,7 +2233,7 @@ static void commonQuakeHandlingPatterns(RewritePatternSet &patterns,
 //===----------------------------------------------------------------------===//
 // QEC lowering patterns.
 //
-// `qec.detector`, `qec.logical_observable`, and `qec.detectors_vectorized`
+// `qec.detector`, `qec.observable`, and `qec.detectors`
 // declare measurement-derived constraints over `!cc.measure_handle` payloads.
 // The QIRAPITypeConverter maps `!cc.measure_handle -> i64`, so the OpAdaptor
 // delivers `i64` for each scalar handle and `!cc.stdvec<i64>` for stdvec
@@ -2265,7 +2265,7 @@ ensureQECRuntimeFuncDecl(ModuleOp module, ConversionPatternRewriter &rewriter,
 // returns a mutable pointer in MLIR's OpConversionPattern.
 static Type getQIRResultPtrType(const TypeConverter *converter,
                                 MLIRContext *ctx) {
-  return converter->convertType(quake::MeasureType::get(ctx));
+  return converter->convertType(cudaq::quake::MeasureType::get(ctx));
 }
 
 // Pack a flat range of `i64` handle payloads into a freshly-allocated
@@ -2290,10 +2290,11 @@ packHandlesAsResultArray(Location loc, ConversionPatternRewriter &rewriter,
   return {asPtrPtr, countVal};
 }
 
-struct DetectorOpConversion : public OpConversionPattern<qec::DetectorOp> {
+struct DetectorOpConversion
+    : public OpConversionPattern<cudaq::qec::DetectorOp> {
   using OpConversionPattern::OpConversionPattern;
   LogicalResult
-  matchAndRewrite(qec::DetectorOp op, OpAdaptor adaptor,
+  matchAndRewrite(cudaq::qec::DetectorOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
     auto module = op->getParentOfType<ModuleOp>();
@@ -2331,11 +2332,11 @@ struct DetectorOpConversion : public OpConversionPattern<qec::DetectorOp> {
   }
 };
 
-struct LogicalObservableOpConversion
-    : public OpConversionPattern<qec::LogicalObservableOp> {
+struct ObservableOpConversion
+    : public OpConversionPattern<cudaq::qec::ObservableOp> {
   using OpConversionPattern::OpConversionPattern;
   LogicalResult
-  matchAndRewrite(qec::LogicalObservableOp op, OpAdaptor adaptor,
+  matchAndRewrite(cudaq::qec::ObservableOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
     auto module = op->getParentOfType<ModuleOp>();
@@ -2353,7 +2354,7 @@ struct LogicalObservableOpConversion
     if (!llvm::all_of(operands,
                       [](Value v) { return isa<IntegerType>(v.getType()); }))
       return rewriter.notifyMatchFailure(
-          op, "qec.logical_observable with stdvec operand is not yet "
+          op, "qec.observable with stdvec operand is not yet "
               "handled by --convert-to-qir-api");
 
     auto resultPtrTy =
@@ -2362,21 +2363,21 @@ struct LogicalObservableOpConversion
     auto [arr, countVal] =
         packHandlesAsResultArray(loc, rewriter, resultPtrTy, operands);
     ensureQECRuntimeFuncDecl(module, rewriter,
-                             cudaq::opt::QIRLogicalObservableFromResults,
+                             cudaq::opt::QIRObservableFromResults,
                              {ptrToPtrTy, i64Ty, i64Ty});
     rewriter.create<func::CallOp>(loc, TypeRange{},
-                                  cudaq::opt::QIRLogicalObservableFromResults,
+                                  cudaq::opt::QIRObservableFromResults,
                                   ValueRange{arr, countVal, obsIdxVal});
     rewriter.eraseOp(op);
     return success();
   }
 };
 
-struct DetectorsVectorizedOpConversion
-    : public OpConversionPattern<qec::DetectorsVectorizedOp> {
+struct DetectorsOpConversion
+    : public OpConversionPattern<cudaq::qec::DetectorsOp> {
   using OpConversionPattern::OpConversionPattern;
   LogicalResult
-  matchAndRewrite(qec::DetectorsVectorizedOp op, OpAdaptor adaptor,
+  matchAndRewrite(cudaq::qec::DetectorsOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
     auto module = op->getParentOfType<ModuleOp>();
@@ -2406,10 +2407,10 @@ struct DetectorsVectorizedOpConversion
     auto [currPtr, currSize] = extract(adaptor.getCurr());
 
     ensureQECRuntimeFuncDecl(module, rewriter,
-                             cudaq::opt::QIRDetectorsVectorizedFromArrays,
+                             cudaq::opt::QIRDetectorsFromArrays,
                              {ptrToPtrTy, i64Ty, ptrToPtrTy, i64Ty});
     rewriter.create<func::CallOp>(
-        loc, TypeRange{}, cudaq::opt::QIRDetectorsVectorizedFromArrays,
+        loc, TypeRange{}, cudaq::opt::QIRDetectorsFromArrays,
         ValueRange{prevPtr, prevSize, currPtr, currSize});
     rewriter.eraseOp(op);
     return success();
@@ -2419,8 +2420,8 @@ struct DetectorsVectorizedOpConversion
 static void addQECConversionPatterns(RewritePatternSet &patterns,
                                      TypeConverter &typeConverter,
                                      MLIRContext *ctx) {
-  patterns.insert<DetectorOpConversion, LogicalObservableOpConversion,
-                  DetectorsVectorizedOpConversion>(typeConverter, ctx);
+  patterns.insert<DetectorOpConversion, ObservableOpConversion,
+                  DetectorsOpConversion>(typeConverter, ctx);
 }
 
 //===----------------------------------------------------------------------===//
@@ -2632,8 +2633,8 @@ struct QuakeToQIRAPIPass
                            LLVM::LLVMDialect>();
     target.addIllegalDialect<cudaq::quake::QuakeDialect,
                              cudaq::codegen::CodeGenDialect>();
-    target.addIllegalOp<qec::DetectorOp, qec::LogicalObservableOp,
-                        qec::DetectorsVectorizedOp>();
+    target.addIllegalOp<cudaq::qec::DetectorOp, cudaq::qec::ObservableOp,
+                        cudaq::qec::DetectorsOp>();
     target.addLegalOp<cudaq::codegen::MaterializeConstantArrayOp>();
     target.addDynamicallyLegalOp<func::FuncOp>([&](func::FuncOp fn) {
       return !needsTypeConversion(fn.getFunctionType()) &&

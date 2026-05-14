@@ -9,8 +9,11 @@
 # DEM (Detector Error Model) analysis primitive. Implemented in its own
 # shared library because `Dem.cpp` includes Stim's headers and links
 # `libstim`; folding it into the main `cudaq` library would force every
-# CUDA-Q consumer to pull Stim transitively. Header lives next to
-# `scope.h` / `resource_counter.h`; only the `.cpp` is built here.
+# CUDA-Q consumer to pull Stim transitively. The user-facing header
+# `dem.h` is the public surface (`cudaq::analysis::compute_dem`) and
+# rides through the `runtime/cudaq` install rule. Linking `nvqir`
+# privately picks up `nvqir::AnalysisScope`, the RAII type that backs
+# `dem::make_scope`.
 add_library(cudaq-analysis SHARED Dem.cpp)
 set_property(GLOBAL APPEND PROPERTY CUDAQ_RUNTIME_LIBS cudaq-analysis)
 

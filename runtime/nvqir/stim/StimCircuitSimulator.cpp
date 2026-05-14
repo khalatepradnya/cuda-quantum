@@ -690,16 +690,16 @@ public:
       recordedCircuit.safe_append_u("DETECTOR", targets);
   }
 
-  void detectors_vectorized(const std::int64_t *prev, const std::int64_t *curr,
-                            std::size_t count) override {
+  void detectors(const std::int64_t *prev, const std::int64_t *curr,
+                 std::size_t count) override {
     for (std::size_t i = 0; i < count; i++) {
       const std::int64_t pair[2] = {prev[i], curr[i]};
       detector(pair, 2);
     }
   }
 
-  void logical_observable(const std::int64_t *indices, std::size_t count,
-                          std::size_t observable_index = 0) override {
+  void observable(const std::int64_t *indices, std::size_t count,
+                  std::size_t observable_index = 0) override {
     flushPendingSampleMeasurements();
     std::vector<uint32_t> targets;
     targets.reserve(count);

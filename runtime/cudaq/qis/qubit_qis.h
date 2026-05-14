@@ -529,8 +529,8 @@ std::vector<measure_result> mz(qubit &q, Qs &&...qs) {
 // instead of producing wrong results.
 //
 // The runtime ABI lives in `runtime/nvqir/NVQIR.cpp` as
-// `__quantum__qis__{detector,logical_observable}_from_results` and
-// `__quantum__qis__detectors_vectorized_from_arrays`, taking opaque
+// `__quantum__qis__{detector,observable}_from_results` and
+// `__quantum__qis__detectors_from_arrays`, taking opaque
 // `Result**` arrays. We do not declare those here because user code never
 // calls them directly; the QIR conversion in `ConvertToQIRAPI.cpp` is the
 // only producer of those calls.
@@ -551,8 +551,8 @@ inline void detector(const std::vector<measure_handle> &ms) { std::abort(); }
 
 /// Declare N detectors by pairing two measurement collections element-wise.
 /// This is the standard form for cross-round detectors.
-inline void detectors_vectorized(const std::vector<measure_handle> &prev,
-                                 const std::vector<measure_handle> &curr) {
+inline void detectors(const std::vector<measure_handle> &prev,
+                      const std::vector<measure_handle> &curr) {
   std::abort();
 }
 

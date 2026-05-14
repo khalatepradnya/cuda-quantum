@@ -13,7 +13,7 @@
 #include "mlir/InitAllDialects.h"
 
 MLIR_DEFINE_CAPI_DIALECT_REGISTRATION(Quake, quake, cudaq::quake::QuakeDialect)
-MLIR_DEFINE_CAPI_DIALECT_REGISTRATION(QEC, qec, qec::QECDialect)
+MLIR_DEFINE_CAPI_DIALECT_REGISTRATION(QEC, qec, cudaq::qec::QECDialect)
 MLIR_DEFINE_CAPI_DIALECT_REGISTRATION(CC, cc, cudaq::cc::CCDialect)
 
 extern "C" void cudaqRegisterAllDialects(MlirContext context) {

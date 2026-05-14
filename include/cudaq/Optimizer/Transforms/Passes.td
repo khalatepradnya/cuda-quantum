@@ -444,8 +444,8 @@ def EraseNoise : Pass<"erase-noise"> {
 def EraseQEC : Pass<"erase-qec"> {
   let summary = "Erase QEC detector and observable declarations.";
   let description = [{
-    Removes `qec.detector`, `qec.logical_observable`, and
-    `qec.detectors_vectorized` operations from the IR. These ops are
+    Removes `qec.detector`, `qec.observable`, and
+    `qec.detectors` operations from the IR. These ops are
     annotations: they declare relationships among prior measurement results
     for analysis engines (DEM via Stim) but produce no quantum-mechanical
     effect. Hardware targets and simulators that do not implement the QEC

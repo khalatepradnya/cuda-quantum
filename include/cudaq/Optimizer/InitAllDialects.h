@@ -34,7 +34,7 @@ inline void registerAllDialects(mlir::DialectRegistry &registry) {
 
     // CUDA-Q dialects
     cudaq::cc::CCDialect,
-    qec::QECDialect,
+    cudaq::qec::QECDialect,
     cudaq::quake::QuakeDialect
   >();
   // clang-format on

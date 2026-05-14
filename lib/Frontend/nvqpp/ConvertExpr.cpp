@@ -2509,7 +2509,7 @@ bool QuakeBridgeVisitor::VisitCallExpr(clang::CallExpr *x) {
     }
 
     // QEC intercepts: lower `cudaq::detector` / `cudaq::logical_observable` /
-    // `cudaq::detectors_vectorized` directly to QEC dialect ops on
+    // `cudaq::detectors` directly to QEC dialect ops on
     // `!cc.measure_handle` (or `!cc.stdvec<!cc.measure_handle>`).
     //
     // The C++ signatures take the measurement operands by reference
@@ -2543,7 +2543,7 @@ bool QuakeBridgeVisitor::VisitCallExpr(clang::CallExpr *x) {
                            "or std::vector<cudaq::measure_handle>");
         ops.push_back(v);
       }
-      qec::DetectorOp::create(builder, loc, ops);
+      cudaq::qec::DetectorOp::create(builder, loc, ops);
       return true;
     }
     if (funcName == "logical_observable") {
@@ -2569,11 +2569,11 @@ bool QuakeBridgeVisitor::VisitCallExpr(clang::CallExpr *x) {
               "or std::vector<cudaq::measure_handle>");
         ops.push_back(v);
       }
-      qec::LogicalObservableOp::create(builder, loc, ops,
+      cudaq::qec::ObservableOp::create(builder, loc, ops,
                                        builder.getI64IntegerAttr(obsIdx));
       return true;
     }
-    if (funcName == "detectors_vectorized" && args.size() == 2) {
+    if (funcName == "detectors" && args.size() == 2) {
       // Both args are required to be `!cc.stdvec<!cc.measure_handle>`; reject
       // anything else with a clang diagnostic at the call site rather than
       // letting a malformed op fall through to the QEC op verifier.
@@ -2583,10 +2583,10 @@ bool QuakeBridgeVisitor::VisitCallExpr(clang::CallExpr *x) {
         auto sv = dyn_cast<cudaq::cc::StdvecType>(arg.getType());
         if (!sv || !isa<cudaq::cc::MeasureHandleType>(sv.getElementType()))
           reportClangError(x, mangler,
-                           "detectors_vectorized arguments must each be a "
+                           "detectors arguments must each be a "
                            "std::vector<cudaq::measure_handle>");
       }
-      qec::DetectorsVectorizedOp::create(builder, loc, prev, curr);
+      cudaq::qec::DetectorsOp::create(builder, loc, prev, curr);
       return true;
     }
 

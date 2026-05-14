@@ -49,19 +49,18 @@ static constexpr const char QIRCustomAdjOp[] =
 static constexpr const char QIRExpPauli[] = "__quantum__qis__exp_pauli";
 
 /// QEC runtime entry-point names. The QIR conversion lowers `qec.detector`,
-/// `qec.logical_observable`, and `qec.detectors_vectorized` into calls to
-/// these symbols. The QPU resolves measurement-handle identity at runtime,
-/// so the compiler only forwards opaque handles (and counts / observable
-/// indices) without inspecting them. Names are preserved across the prototype
-/// for ABI compatibility.
+/// `qec.observable`, and `qec.detectors` into calls to these symbols. The QPU
+/// resolves measurement-handle identity at runtime, so the compiler only
+/// forwards opaque handles (and counts / observable indices) without
+/// inspecting them.
 static constexpr const char QIRDetectorFromResults[] =
     "__quantum__qis__detector_from_results";
-static constexpr const char QIRLogicalObservableFromResults[] =
-    "__quantum__qis__logical_observable_from_results";
+static constexpr const char QIRObservableFromResults[] =
+    "__quantum__qis__observable_from_results";
 static constexpr const char QIRDetectorFromArray[] =
     "__quantum__qis__detector_from_array";
-static constexpr const char QIRDetectorsVectorizedFromArrays[] =
-    "__quantum__qis__detectors_vectorized_from_arrays";
+static constexpr const char QIRDetectorsFromArrays[] =
+    "__quantum__qis__detectors_from_arrays";
 
 static constexpr const char NVQIRInvokeWithControlBits[] =
     "invokeWithControlQubits";
