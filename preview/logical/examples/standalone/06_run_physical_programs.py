@@ -92,13 +92,16 @@ for label, model in (("clean", None), ("p=0.1", noise), ("clean", None)):
     print(f"flip {label}: {sum(results)} of {shots} shots are True")
 
 # %%
-# 4. Calls and runtime control flow are not lowered yet. A program whose
-# gadgets compile to `phys.call` reports the operation it cannot translate.
+# 4. A program compiled for the device calls the device's gadgets. Each call
+# runs its gadget body in place. The second `prepare_zero` and `measure_z`
+# replay the first calls' bodies on the other qubit.
 
 
 @cql.program
-def calls_gadgets() -> bool:
-    return cql.measure_z(cql.prepare_zero())
+def calls_gadgets() -> tuple[bool, bool]:
+    a = cql.prepare_zero()
+    b = cql.prepare_zero()
+    return cql.measure_z(a), cql.measure_z(b)
 
 
 calls_build = cql.compile(calls_gadgets,
@@ -107,7 +110,4 @@ calls_build = cql.compile(calls_gadgets,
 calls_build = cql.compile(calls_build,
                           pipeline=cql.compiler.pipelines.physical(),
                           device=device)
-try:
-    cudaq.run(calls_build)
-except RuntimeError as error:
-    print("not supported:", str(error).splitlines()[1])
+print("calls_gadgets:", cudaq.run(calls_build, shots_count=4))

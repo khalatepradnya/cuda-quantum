@@ -8,14 +8,17 @@
 """`cudaq.run` on P3 physical Builds, through `Build.to_quake()`."""
 
 import gc
+import math
 
 import pytest
 
 import cudaq
 import cudaq.logical as cql
 import cudaq.mlir.ir as mlir_ir
-from cudaq.logical import codes, gadgets
+from cudaq.logical import codes, gadgets, std
 from cudaq.logical.compiler import Build, PhysicalBuilder
+from cudaq.logical.gadgets import gadget, patch
+from cudaq.logical.ops import _impl as ops
 
 requires_gpu = pytest.mark.skipif(cudaq.num_available_gpus() == 0,
                                   reason="the nvidia target needs a GPU")
@@ -240,7 +243,7 @@ def flipped_shots(results):
 def test_noise_acts_on_emitted_gates(target):
     # The same Builds run clean, noisy, and clean again, twice. A bit flip
     # with probability 0.5 changes about half of the 512 shots: the bound is
-    # about 5.6 standard deviations. qpp-cpu ignores noise, for ordinary
+    # about 5.6 standard deviations. `qpp-cpu` ignores noise, for ordinary
     # kernels too.
     cudaq.set_random_seed(13)
     scalar, listed = cql.compile(x_then_mz), cql.compile(first_of_three)
@@ -264,7 +267,7 @@ def test_noise_acts_on_emitted_gates(target):
 
 
 def test_certain_noise_is_deterministic(target):
-    # Of these targets, only density-matrix-cpu takes probability 1.
+    # Of these targets, only `density-matrix-cpu` takes probability 1.
     if target[0] != "density-matrix-cpu":
         pytest.skip("only density-matrix-cpu takes probability 1")
     for kernel, noisy in ((ordinary_bool, False), (cql.compile(x_then_mz),
@@ -289,6 +292,25 @@ def test_failed_noisy_run_leaves_no_noise(target):
 
 
 BARE = codes.BareQubit
+X, Y, Z = cql.types.X, cql.types.Y, cql.types.Z
+
+
+@gadget(implements=std.x)
+def bare_x(q: patch[BARE]) -> patch[BARE]:
+    return ops.x(q.data)
+
+
+@gadget(implements=std.h)
+def bare_h(q: patch[BARE]) -> patch[BARE]:
+    return ops.h(q.data)
+
+
+@gadget(implements=std.cx)
+def bare_cx(a: patch[BARE], b: patch[BARE]) -> tuple[patch[BARE], patch[BARE]]:
+    return ops.cx(a.data, b.data)
+
+
+bare_measure_x = gadgets.measure_x(BARE)
 
 
 def bare_device():
@@ -296,7 +318,8 @@ def bare_device():
     architecture = cql.devices.QECArchitecture(
         "run_physical_bare_architecture",
         BARE.default_encoding,
-        link_roots=(gadgets.prepare_zero(BARE), gadgets.measure_z(BARE)),
+        link_roots=(gadgets.prepare_zero(BARE), gadgets.measure_z(BARE),
+                    bare_measure_x, bare_x, bare_h, bare_cx),
     )
     builder = cql.devices.DeviceBuilder("run_physical_bare_device",
                                         source_module=None)
@@ -305,8 +328,9 @@ def bare_device():
     builder.physical.bind(encoded,
                           to=builder.physical.add_qubits(
                               2 * BARE.block.size,
-                              native_actions=actions.clifford_set(),
+                              native_actions=(*actions.clifford_set(), "rpp"),
                               native_instruments=(instruments.MZ,
+                                                  instruments.MX,
                                                   instruments.MPP)))
     builder.physical.set_operating_point(timing={"cycle_ns": 1.0})
     return builder.build()
@@ -412,6 +436,112 @@ def test_computed_booleans():
                      shots_count=SHOTS) == [[False, True]] * SHOTS
 
 
+def allocate():
+    return cql.ops.allocate_patch(BARE, region="compute")
+
+
+# Gadget calls compile to `phys.call`, and a repeated call to a
+# `phys.call_template` that replays the first on another carrier.
+@cql.program
+def flip_first() -> tuple[bool, bool]:
+    a = cql.prepare_zero()
+    b = cql.prepare_zero()
+    return cql.measure_z(cql.x(a)), cql.measure_z(b)
+
+
+# Both measurements replay one call body, so their records share a label.
+@cql.program
+def same_label() -> tuple[bool, bool]:
+    first = cql.measure_z(cql.prepare_zero())
+    return first, cql.measure_z(cql.x(cql.prepare_zero()))
+
+
+@cql.program
+def three_flips() -> bool:
+    return cql.measure_z(cql.x(cql.x(cql.x(cql.prepare_zero()))))
+
+
+@cql.protocol
+def inverted_product() -> tuple[bool, bool]:
+    a = cql.prepare_zero(allocate())
+    b = cql.prepare_zero(allocate())
+    a, b, negated = cql.mpp(-(Z(a[0]) @ Z(b[0])))
+    a, b, plain = cql.mpp(Z(a[0]) @ Z(b[0]))
+    cql.discard((a, b))
+    return negated, plain
+
+
+# Under `exp(-i angle P / 2)`, Y@Z by pi/2 takes `a` to |+> while `b` is
+# |0>, and -Y by pi/2 takes `b` to |->.
+@cql.protocol
+def signed_rotations() -> tuple[bool, bool]:
+    a = cql.prepare_zero(allocate())
+    b = cql.prepare_zero(allocate())
+    a, b = cql.ops.rotate(Y(a[0]) @ Z(b[0]), angle=math.pi / 2)
+    b, = cql.ops.rotate(-Y(b[0]), angle=math.pi / 2)
+    return bare_measure_x(a), bare_measure_x(b)
+
+
+@pytest.mark.parametrize("definition, expected", [
+    (flip_first, [True, False]),
+    (same_label, [False, True]),
+    (three_flips, True),
+    (inverted_product, [True, False]),
+    (signed_rotations, [False, True]),
+])
+def test_calls_and_products(definition, expected):
+    assert cudaq.run(physical_build(definition),
+                     shots_count=SHOTS) == [expected] * SHOTS
+
+
+@cql.program
+def bell_pair() -> tuple[bool, bool]:
+    a, b = cql.cx(cql.h(cql.prepare_zero()), cql.prepare_zero())
+    return cql.measure_z(a), cql.measure_z(b)
+
+
+# X@X on |00> is random. Z@Z commutes with it and stays +1, and a second
+# X@X repeats the first outcome only if the first left the product state.
+@cql.protocol
+def product_coherence() -> tuple[bool, bool, bool]:
+    a = cql.prepare_zero(allocate())
+    b = cql.prepare_zero(allocate())
+    a, b, first = cql.mpp(X(a[0]) @ X(b[0]))
+    a, b, middle = cql.mpp(Z(a[0]) @ Z(b[0]))
+    a, b, last = cql.mpp(X(a[0]) @ X(b[0]))
+    cql.discard((a, b))
+    return first, middle, last
+
+
+def test_correlated_results():
+    # Each outcome is missed in 100 shots with probability 2**-100.
+    bell = cudaq.run(physical_build(bell_pair), shots_count=100)
+    assert all(a == b for a, b in bell) and {a for a, _ in bell
+                                            } == {False, True}
+    products = cudaq.run(physical_build(product_coherence), shots_count=100)
+    assert all(not middle and last == first for first, middle, last in products)
+    assert {first for first, _, _ in products} == {False, True}
+
+
+# Three rotations by pi/3 make a pi rotation about X, so the result is
+# deterministic although each rotation is not Clifford.
+@cql.protocol
+def non_clifford_rotations() -> bool:
+    a = cql.prepare_zero(allocate())
+    for _ in range(3):
+        a, = cql.ops.rotate(X(a[0]), angle=math.pi / 3)
+    return gadgets.measure_z(BARE)(a)
+
+
+def test_non_clifford_rotations(target):
+    build = physical_build(non_clifford_rotations)
+    if target[0] == "stim":
+        with pytest.raises(RuntimeError, match="Gate not supported by Stim"):
+            cudaq.run(build)
+        return
+    assert cudaq.run(build, shots_count=SHOTS) == [True] * SHOTS
+
+
 def test_run_contract_matches_ordinary_run():
     build = cql.compile(x_then_mz)
     assert cudaq.run(build, shots_count=0) == []
@@ -456,9 +586,11 @@ def state_result():
     return flip(q)
 
 
-@cql.program
-def calls_gadgets() -> bool:
-    return cql.measure_z(cql.prepare_zero())
+@cql.protocol
+def counted_loop() -> bool:
+    a = cql.prepare_zero(allocate())
+    a = cql.ops.repeat(3, carries=(a,), body=bare_x)
+    return gadgets.measure_z(BARE)(a)
 
 
 @pytest.mark.parametrize("make, error, message", [
@@ -479,11 +611,11 @@ def calls_gadgets() -> bool:
                  RuntimeError,
                  r"returns result 0 of type '!phys.state<@state_result_",
                  id="state"),
-    pytest.param(lambda: physical_build(calls_gadgets),
+    pytest.param(lambda: physical_build(counted_loop),
                  RuntimeError,
-                 "'phys.call' op has no lowering to Quake",
-                 id="call"),
-    pytest.param(physical(calls_gadgets),
+                 "'cflow.repeat' op has no lowering to Quake",
+                 id="control_flow"),
+    pytest.param(physical(three_flips),
                  ValueError,
                  "requires a Build of a physical graph, not of a program",
                  id="not_physical"),

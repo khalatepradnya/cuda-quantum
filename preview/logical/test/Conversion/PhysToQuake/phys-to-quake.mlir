@@ -231,3 +231,132 @@ module {
 // CHECK:           %[[SEQUENCE_INIT_1:.*]] = cc.sequence_init %[[VAL_1]], %[[SEQUENCE_SIZE_0]] : (!cc.ptr<i8>, i64) -> !cc.sequence<i1>
 // CHECK:           return %[[SEQUENCE_INIT_1]] : !cc.sequence<i1>
 // CHECK:         }
+
+// -----
+
+// A call is inlined. A template replays the call that `template_event` names,
+// with `state_aliases` renaming the body's carriers: "flip_b" flips @b, and
+// "measure_b" measures it. The elided "flip_b" has no SSA boundary, so %1
+// still names @b after it. "flip_c", inside the call "outer", replays "flip"
+// on @c, and the body of "outer" captures the records of the calls before it.
+module attributes {qlx.profiles = ["p3"]} {
+  fabric.gadget_spec @gate_spec for @objective : () -> () {encodings = []}
+  fabric.gadget @gate() {
+    fabric.return
+  } {realization_boundary = {}, spec = @gate_spec}
+  phys.machine @m {
+    phys.resource_class @q {count = 3 : i64, kind = "qubit", native_actions = [@x, @h], native_instruments = [@mz]}
+  }
+  phys.action @x {arity = 1 : i64, process = "{\"kind\":\"builtin\",\"name\":\"x\",\"parameters\":{}}"}
+  phys.action @h {arity = 1 : i64, process = "{\"kind\":\"builtin\",\"name\":\"h\",\"parameters\":{}}"}
+  phys.instrument @mz {arity = 1 : i64, kind = "measure", preserves_inputs, process = "{\"kind\":\"builtin\",\"name\":\"measure_z\",\"parameters\":{}}", record_schema = "bit"}
+  phys.resource @a {index = 0 : i64, kind = "qubit", resource_class = @q}
+  phys.resource @b {index = 1 : i64, kind = "qubit", resource_class = @q}
+  phys.resource @c {index = 2 : i64, kind = "qubit", resource_class = @q}
+  phys.graph @entry on @m : () -> (!phys.record<@bit>, !phys.record<@bit>, i1) {
+    %0 = phys.acquire [@a] {event_id = "acquire_a"} : !phys.state<@a>
+    %1 = phys.acquire [@b] {event_id = "acquire_b"} : !phys.state<@b>
+    %2 = "phys.call"(%0) <{callee = @gate, event_id = "flip", instance = "gate.0"}> ({
+    ^bb0(%s: !phys.state<@a>):
+      %t = phys.apply @x(%s) {event_id = "x"} : (!phys.state<@a>) -> !phys.state<@a>
+      phys.yield %t : !phys.state<@a>
+    }) : (!phys.state<@a>) -> !phys.state<@a>
+    phys.call_template {callee = @gate, event_id = "flip_b", instance = "gate.1", state_aliases = [{alias = @b, template = @a}], state_boundary_elided, template_event = "flip"} : () -> ()
+    %3:2 = "phys.call"(%2) <{callee = @gate, event_id = "measure", instance = "gate.2"}> ({
+    ^bb0(%s: !phys.state<@a>):
+      %o, %r = phys.measure @mz(%s) {event_id = "mz", record_id = "m"} : (!phys.state<@a>) -> (!phys.state<@a>, !phys.record<@bit>)
+      phys.yield %o, %r : !phys.state<@a>, !phys.record<@bit>
+    }) : (!phys.state<@a>) -> (!phys.state<@a>, !phys.record<@bit>)
+    %4:2 = phys.call_template %1 {callee = @gate, event_id = "measure_b", instance = "gate.3", state_aliases = [{alias = @b, template = @a}], template_event = "measure"} : (!phys.state<@b>) -> (!phys.state<@b>, !phys.record<@bit>)
+    %5 = phys.acquire [@c] {event_id = "acquire_c"} : !phys.state<@c>
+    %6:2 = "phys.call"(%5) <{callee = @gate, event_id = "outer", instance = "gate.4"}> ({
+    ^bb0(%s: !phys.state<@c>):
+      phys.call_template {callee = @gate, event_id = "flip_c", instance = "gate.5", state_aliases = [{alias = @c, template = @a}], state_boundary_elided, template_event = "flip"} : () -> ()
+      %p = phys.condition %3#1 {event_id = "bit_a", expected = true} : !phys.record<@bit> -> i1
+      %q = phys.condition %4#1 {event_id = "bit_b", expected = true} : !phys.record<@bit> -> i1
+      %e = phys.xor %p, %q {event_id = "parity"} : i1
+      phys.yield %s, %e : !phys.state<@c>, i1
+    }) : (!phys.state<@c>) -> (!phys.state<@c>, i1)
+    phys.release %3#0, %4#0, %6#0 {event_id = "release"} : !phys.state<@a>, !phys.state<@b>, !phys.state<@c>
+    phys.return %3#1, %4#1, %6#1 : !phys.record<@bit>, !phys.record<@bit>, i1
+  }
+}
+
+// CHECK-LABEL:   func.func @__nvqpp__mlirgen__entry() -> !cc.sequence<i1> attributes {"cudaq-entrypoint", "cudaq-kernel"} {
+// CHECK:           %[[NULL_WIRE_0:.*]] = quake.null_wire
+// CHECK:           %[[NULL_WIRE_1:.*]] = quake.null_wire
+// CHECK:           %[[X_0:.*]] = quake.x %[[NULL_WIRE_0]] : (!quake.wire) -> !quake.wire
+// CHECK:           %[[X_1:.*]] = quake.x %[[NULL_WIRE_1]] : (!quake.wire) -> !quake.wire
+// CHECK:           %[[VAL_0:.*]], %[[MZ_0:.*]] = quake.mz %[[X_0]] : (!quake.wire) -> (!cc.measure_handle, !quake.wire)
+// CHECK:           %[[VAL_1:.*]], %[[MZ_1:.*]] = quake.mz %[[X_1]] : (!quake.wire) -> (!cc.measure_handle, !quake.wire)
+// CHECK:           %[[NULL_WIRE_2:.*]] = quake.null_wire
+// CHECK:           %[[X_2:.*]] = quake.x %[[NULL_WIRE_2]] : (!quake.wire) -> !quake.wire
+// CHECK:           %[[DISCRIMINATE_0:.*]] = quake.discriminate %[[VAL_0]] : (!cc.measure_handle) -> i1
+// CHECK:           %[[DISCRIMINATE_1:.*]] = quake.discriminate %[[VAL_1]] : (!cc.measure_handle) -> i1
+// CHECK:           %[[XORI_0:.*]] = arith.xori %[[DISCRIMINATE_0]], %[[DISCRIMINATE_1]] : i1
+
+// -----
+
+// A product measurement collects the parity on a fresh ancilla. X and Y
+// operands are changed to Z around their CX, and `invert` complements the
+// bit where it is read. A product rotation is `exp(-i angle P / 2)`: a CX
+// ladder around `rz`, or around `s`, `z`, or `sdg` for a multiple of pi/2.
+module {
+  phys.instrument @mpp {kind = "measure_product", variadic, record_schema = "bit", preserves_inputs, process = "{\"kind\":\"builtin\",\"name\":\"measure_product\",\"parameters\":{}}"}
+  phys.machine @m {
+    phys.resource_class @q {count = 2 : i64, kind = "qubit", native_actions = [], native_instruments = [@mpp]}
+  }
+  phys.resource @a {capabilities = ["qlx.physical/native_pauli_product_rotation"], index = 0 : i64, kind = "qubit", resource_class = @q}
+  phys.resource @b {capabilities = ["qlx.physical/native_pauli_product_rotation"], index = 1 : i64, kind = "qubit", resource_class = @q}
+  phys.graph @entry on @m : () -> (!phys.record<@bit>, !phys.record<@bit>) {
+    %0:2 = phys.acquire [@a, @b] {event_id = "e0"} : !phys.state<@a>, !phys.state<@b>
+    %1:3 = phys.measure_product %0#0, %0#1 {event_id = "e1", instrument = @mpp, paulis = ["X", "Y"], record_id = "r0"} : (!phys.state<@a>, !phys.state<@b>) -> (!phys.state<@a>, !phys.state<@b>, !phys.record<@bit>)
+    %2:3 = phys.measure_product %1#0, %1#1 {event_id = "e2", instrument = @mpp, invert, paulis = ["Z", "Z"], record_id = "r1"} : (!phys.state<@a>, !phys.state<@b>) -> (!phys.state<@a>, !phys.state<@b>, !phys.record<@bit>)
+    %3:2 = phys.rotate_product %2#0, %2#1 {angle = 1.250000e-01 : f64, event_id = "e3", paulis = ["Y", "Z"]} : (!phys.state<@a>, !phys.state<@b>) -> (!phys.state<@a>, !phys.state<@b>)
+    %4 = phys.rotate_product %3#0 {angle = 1.5707963267948966 : f64, event_id = "e4", paulis = ["X"]} : (!phys.state<@a>) -> !phys.state<@a>
+    %5 = phys.rotate_product %4 {angle = -3.1415926535897931 : f64, event_id = "e5", paulis = ["Z"]} : (!phys.state<@a>) -> !phys.state<@a>
+    %6 = phys.rotate_product %5 {angle = -1.5707963267948966 : f64, event_id = "e6", paulis = ["Z"]} : (!phys.state<@a>) -> !phys.state<@a>
+    %7 = phys.rotate_product %6 {angle = 6.2831853071795862 : f64, event_id = "e7", paulis = ["Z"]} : (!phys.state<@a>) -> !phys.state<@a>
+    phys.release %7, %3#1 {event_id = "e8"} : !phys.state<@a>, !phys.state<@b>
+    phys.return %1#2, %2#2 : !phys.record<@bit>, !phys.record<@bit>
+  }
+}
+
+// CHECK-LABEL:   func.func @__nvqpp__mlirgen__entry() -> !cc.sequence<i1> attributes {"cudaq-entrypoint", "cudaq-kernel"} {
+// CHECK:           %[[NULL_WIRE_0:.*]] = quake.null_wire
+// CHECK:           %[[NULL_WIRE_1:.*]] = quake.null_wire
+// CHECK:           %[[NULL_WIRE_2:.*]] = quake.null_wire
+// CHECK:           %[[H_0:.*]] = quake.h %[[NULL_WIRE_0]] : (!quake.wire) -> !quake.wire
+// CHECK:           %[[X_0:.*]]:2 = quake.x {{\[}}%[[H_0]]] %[[NULL_WIRE_2]] : (!quake.wire, !quake.wire) -> (!quake.wire, !quake.wire)
+// CHECK:           %[[H_1:.*]] = quake.h %[[X_0]]#0 : (!quake.wire) -> !quake.wire
+// CHECK:           %[[S_0:.*]] = quake.s<adj> %[[NULL_WIRE_1]] : (!quake.wire) -> !quake.wire
+// CHECK:           %[[H_2:.*]] = quake.h %[[S_0]] : (!quake.wire) -> !quake.wire
+// CHECK:           %[[X_1:.*]]:2 = quake.x {{\[}}%[[H_2]]] %[[X_0]]#1 : (!quake.wire, !quake.wire) -> (!quake.wire, !quake.wire)
+// CHECK:           %[[H_3:.*]] = quake.h %[[X_1]]#0 : (!quake.wire) -> !quake.wire
+// CHECK:           %[[S_1:.*]] = quake.s %[[H_3]] : (!quake.wire) -> !quake.wire
+// CHECK:           %[[VAL_0:.*]], %[[MZ_0:.*]] = quake.mz %[[X_1]]#1 : (!quake.wire) -> (!cc.measure_handle, !quake.wire)
+// CHECK:           quake.sink %[[MZ_0]] : !quake.wire
+// CHECK:           %[[NULL_WIRE_3:.*]] = quake.null_wire
+// CHECK:           %[[X_2:.*]]:2 = quake.x {{\[}}%[[H_1]]] %[[NULL_WIRE_3]] : (!quake.wire, !quake.wire) -> (!quake.wire, !quake.wire)
+// CHECK:           %[[X_3:.*]]:2 = quake.x {{\[}}%[[S_1]]] %[[X_2]]#1 : (!quake.wire, !quake.wire) -> (!quake.wire, !quake.wire)
+// CHECK:           %[[VAL_1:.*]], %[[MZ_1:.*]] = quake.mz %[[X_3]]#1 : (!quake.wire) -> (!cc.measure_handle, !quake.wire)
+// CHECK:           quake.sink %[[MZ_1]] : !quake.wire
+// CHECK:           %[[S_2:.*]] = quake.s<adj> %[[X_2]]#0 : (!quake.wire) -> !quake.wire
+// CHECK:           %[[H_4:.*]] = quake.h %[[S_2]] : (!quake.wire) -> !quake.wire
+// CHECK:           %[[X_4:.*]]:2 = quake.x {{\[}}%[[H_4]]] %[[X_3]]#0 : (!quake.wire, !quake.wire) -> (!quake.wire, !quake.wire)
+// CHECK:           %[[CONSTANT_0:.*]] = arith.constant 1.250000e-01 : f64
+// CHECK:           %[[RZ_0:.*]] = quake.rz (%[[CONSTANT_0]]) %[[X_4]]#1 : (f64, !quake.wire) -> !quake.wire
+// CHECK:           %[[X_5:.*]]:2 = quake.x {{\[}}%[[X_4]]#0] %[[RZ_0]] : (!quake.wire, !quake.wire) -> (!quake.wire, !quake.wire)
+// CHECK:           %[[H_5:.*]] = quake.h %[[X_5]]#0 : (!quake.wire) -> !quake.wire
+// CHECK:           %[[S_3:.*]] = quake.s %[[H_5]] : (!quake.wire) -> !quake.wire
+// CHECK:           %[[H_6:.*]] = quake.h %[[S_3]] : (!quake.wire) -> !quake.wire
+// CHECK:           %[[S_4:.*]] = quake.s %[[H_6]] : (!quake.wire) -> !quake.wire
+// CHECK:           %[[H_7:.*]] = quake.h %[[S_4]] : (!quake.wire) -> !quake.wire
+// CHECK:           %[[Z_0:.*]] = quake.z %[[H_7]] : (!quake.wire) -> !quake.wire
+// CHECK:           %[[S_5:.*]] = quake.s<adj> %[[Z_0]] : (!quake.wire) -> !quake.wire
+// CHECK:           quake.sink %[[S_5]] : !quake.wire
+// CHECK:           quake.sink %[[X_5]]#1 : !quake.wire
+// CHECK:           %[[DISCRIMINATE_0:.*]] = quake.discriminate %[[VAL_0]] : (!cc.measure_handle) -> i1
+// CHECK:           %[[DISCRIMINATE_1:.*]] = quake.discriminate %[[VAL_1]] : (!cc.measure_handle) -> i1
+// CHECK:           %[[CONSTANT_1:.*]] = arith.constant true
+// CHECK:           %[[XORI_0:.*]] = arith.xori %[[DISCRIMINATE_1]], %[[CONSTANT_1]] : i1

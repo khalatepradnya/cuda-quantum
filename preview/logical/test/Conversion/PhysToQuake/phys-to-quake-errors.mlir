@@ -284,9 +284,8 @@ module {
 
 // -----
 
-// Calls are not lowered yet. A call template replays an earlier call, so a
-// program with templates stops at that call. The call follows
-// test/Model/p3-structured-control.mlir.
+// Retry replays an attempt until it succeeds. The attempt's call lowers, and
+// the retry stops the pass. It follows test/Model/p3-structured-control.mlir.
 module attributes {qlx.profiles = ["p3"]} {
   fabric.gadget_spec @attempt_spec for @objective : () -> () {encodings = []}
   fabric.gadget @attempt() {
@@ -294,55 +293,57 @@ module attributes {qlx.profiles = ["p3"]} {
   } {realization_boundary = {}, spec = @attempt_spec}
   fabric.gadget_profile @attempt_profile for @attempt {}
   phys.machine @m {
-    phys.resource_class @q {count = 1 : i64, kind = "qubit", native_actions = []}
+    phys.resource_class @q {count = 1 : i64, kind = "qubit", native_actions = [], native_instruments = [@mz]}
   }
+  phys.instrument @mz {arity = 1 : i64, kind = "measure", preserves_inputs, process = "{\"kind\":\"builtin\",\"name\":\"measure_z\",\"parameters\":{}}", record_schema = "bit"}
   phys.resource @a {index = 0 : i64, kind = "qubit", resource_class = @q}
   phys.graph @entry on @m : () -> () {
     %0 = phys.acquire [@a] {event_id = "e0"} : !phys.state<@a>
-    // expected-error@+1 {{'phys.call' op has no lowering to Quake}}
-    %1 = "phys.call"(%0) <{callee = @attempt, event_id = "call0", instance = "attempt.0", profile = @attempt_profile}> ({
+    %1:2 = "phys.call"(%0) <{callee = @attempt, event_id = "attempt0", instance = "attempt.0", profile = @attempt_profile}> ({
     ^bb0(%current: !phys.state<@a>):
-      phys.yield %current : !phys.state<@a>
-    }) : (!phys.state<@a>) -> !phys.state<@a>
-    phys.release %1 {event_id = "e1"} : !phys.state<@a>
+      %o, %r = phys.measure @mz(%current) {event_id = "m0", record_id = "attempt_result"} : (!phys.state<@a>) -> (!phys.state<@a>, !phys.record<@bit>)
+      phys.yield %o, %r : !phys.state<@a>, !phys.record<@bit>
+    }) : (!phys.state<@a>) -> (!phys.state<@a>, !phys.record<@bit>)
+    %2 = phys.condition %1#1 {event_id = "decision0"} : !phys.record<@bit> -> i1
+    // expected-error@+1 {{'phys.retry' op has no lowering to Quake}}
+    %3 = phys.retry %2 carries (%1#0) {attempt = @attempt, attempt_event = "attempt0", decision_event = "decision0", event_id = "retry0", max_attempts = 3 : i64, profile = @attempt_profile} : (!phys.state<@a>) -> !phys.state<@a>
+    phys.release %3 {event_id = "e1"} : !phys.state<@a>
     phys.return
   }
 }
 
 // -----
 
-// Product measurements and rotations are not lowered yet. They follow
-// test/Model/p3-measure-product.mlir.
+// An unresolved product instrument verifies in a partially linked module.
 module {
-  phys.instrument @mpp {kind = "measure_product", variadic, record_schema = "bit", preserves_inputs, process = "{\"kind\":\"builtin\",\"name\":\"measure_product\",\"parameters\":{}}"}
   phys.machine @m {
-    phys.resource_class @q {count = 2 : i64, kind = "qubit", native_actions = [], native_instruments = [@mpp]}
+    phys.resource_class @q {count = 1 : i64, kind = "qubit", native_actions = [], native_instruments = [@mpp]}
   }
   phys.resource @a {index = 0 : i64, kind = "qubit", resource_class = @q}
-  phys.resource @b {index = 1 : i64, kind = "qubit", resource_class = @q}
   phys.graph @entry on @m : () -> !phys.record<@bit> {
-    %0:2 = phys.acquire [@a, @b] {event_id = "e0"} : !phys.state<@a>, !phys.state<@b>
-    // expected-error@+1 {{'phys.measure_product' op has no lowering to Quake}}
-    %1:3 = phys.measure_product %0#0, %0#1 {event_id = "e1", instrument = @mpp, paulis = ["X", "Z"], record_id = "r"} : (!phys.state<@a>, !phys.state<@b>) -> (!phys.state<@a>, !phys.state<@b>, !phys.record<@bit>)
-    phys.release %1#0, %1#1 {event_id = "e2"} : !phys.state<@a>, !phys.state<@b>
-    phys.return %1#2 : !phys.record<@bit>
+    %0 = phys.acquire [@a] {event_id = "e0"} : !phys.state<@a>
+    // expected-error@+1 {{'phys.measure_product' op names instrument @mpp, which resolves to no phys.instrument}}
+    %1:2 = phys.measure_product %0 {event_id = "e1", instrument = @mpp, paulis = ["Z"], record_id = "r"} : (!phys.state<@a>) -> (!phys.state<@a>, !phys.record<@bit>)
+    phys.release %1#0 {event_id = "e2"} : !phys.state<@a>
+    phys.return %1#1 : !phys.record<@bit>
   }
 }
 
 // -----
 
+// The verifier checks the instrument's kind, not its process.
 module {
+  phys.instrument @mpp {kind = "measure_product", variadic, record_schema = "bit", preserves_inputs, process = "{\"kind\":\"builtin\",\"name\":\"measure_z\",\"parameters\":{}}"}
   phys.machine @m {
-    phys.resource_class @q {count = 2 : i64, kind = "qubit", native_actions = [], native_instruments = []}
+    phys.resource_class @q {count = 1 : i64, kind = "qubit", native_actions = [], native_instruments = [@mpp]}
   }
-  phys.resource @a {capabilities = ["qlx.physical/native_pauli_product_rotation"], index = 0 : i64, kind = "qubit", resource_class = @q}
-  phys.resource @b {capabilities = ["qlx.physical/native_pauli_product_rotation"], index = 1 : i64, kind = "qubit", resource_class = @q}
-  phys.graph @entry on @m : () -> () {
-    %0:2 = phys.acquire [@a, @b] {event_id = "e0"} : !phys.state<@a>, !phys.state<@b>
-    // expected-error@+1 {{'phys.rotate_product' op has no lowering to Quake}}
-    %1:2 = phys.rotate_product %0#0, %0#1 {angle = 1.250000e-01 : f64, event_id = "e1", paulis = ["Y", "Z"]} : (!phys.state<@a>, !phys.state<@b>) -> (!phys.state<@a>, !phys.state<@b>)
-    phys.release %1#0, %1#1 {event_id = "e2"} : !phys.state<@a>, !phys.state<@b>
-    phys.return
+  phys.resource @a {index = 0 : i64, kind = "qubit", resource_class = @q}
+  phys.graph @entry on @m : () -> !phys.record<@bit> {
+    %0 = phys.acquire [@a] {event_id = "e0"} : !phys.state<@a>
+    // expected-error@+1 {{'phys.measure_product' op measures with builtin process 'measure_z', which has no lowering to Quake}}
+    %1:2 = phys.measure_product %0 {event_id = "e1", instrument = @mpp, paulis = ["Z"], record_id = "r"} : (!phys.state<@a>) -> (!phys.state<@a>, !phys.record<@bit>)
+    phys.release %1#0 {event_id = "e2"} : !phys.state<@a>
+    phys.return %1#1 : !phys.record<@bit>
   }
 }
 

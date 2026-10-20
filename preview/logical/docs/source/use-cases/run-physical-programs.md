@@ -52,6 +52,15 @@ without a result. Arguments pass as they do for an ordinary kernel. A Logical
   action's symbol name does not matter.
 - A Z measurement is `mz`. An X measurement is `h` then `mz`, followed by `h`
   when the qubit survives, so that the qubit keeps the measured X eigenstate.
+- A product measurement collects its parity on a fresh ancilla qubit. Each
+  qubit is changed to the Z basis around a `cx` into the ancilla, and the
+  ancilla is measured and freed, so the measured qubits keep their
+  post-measurement state. A negated product returns the complemented bit.
+- A product rotation by `angle` is `exp(-i angle P / 2)`: basis changes and a
+  `cx` ladder around `rz`. A multiple of pi/2 uses `s`, `z`, or `sdg` in
+  place of `rz`, so that Clifford rotations run on `stim`.
+- A gadget call runs its body in place. A repeated call, which P3 states as a
+  call template, runs the same body on its own qubits.
 - `delay`, `barrier`, `move`, and `fence` emit no gates.
 
 `print(build.to_quake())` shows the exact circuit. Each call returns a new
@@ -63,10 +72,12 @@ module, and the Build does not change.
   does for any kernel. The same Build emits the same circuit with or without
   a model. Delays and moves emit no gates, so they add no noise, and a run does
   not model the schedule's timing, idle periods, or transport.
-- X measurements and `plus` preparations run as the gates that `to_quake()`
-  shows.
+- X measurements, `plus` preparations, and product measurements and
+  rotations run as the gates that `to_quake()` shows. A noise model acts on
+  those gates, including the `cx` gates of a product measurement.
 - `stim` runs Clifford programs, also with Pauli noise, and suits larger
-  programs. `density-matrix-cpu` and `nvidia` also apply noise models.
+  programs. It rejects `t` gates and product rotations by angles that are not
+  multiples of pi/2. `density-matrix-cpu` and `nvidia` also apply noise models.
   `qpp-cpu` ignores noise models with a warning, as it does for any kernel.
 
 ## Limits
@@ -74,12 +85,12 @@ module, and the Build does not change.
 `to_quake()` raises an error that names the first operation it cannot
 translate. These forms do not translate:
 
-- Calls, call templates, product measurements and rotations, and runtime
-  control flow (`cflow.if`, `cflow.repeat`, `cflow.while`). Most
-  `@cql.program` and `@cql.protocol` compilations contain calls. A Python loop
-  or branch in the authoring code produces straight-line P3 and runs.
+- Runtime control flow (`cflow.if`, `cflow.repeat`, `cflow.while`), such as
+  `cql.ops.cond` and `cql.ops.repeat` in a protocol. A Python loop or branch
+  in the authoring code produces straight-line P3 and runs.
 - Retry, post-selection, resource and factory flows, and code epoch
   transitions.
 - Patch-granularity resources, where one state stands for a whole code patch.
-- Actions with parameters or reservations, such as `rz`, and processes that
-  are not builtin.
+- Actions with parameters or reservations, such as the trapped-ion `rz`,
+  `zz`, and `phased_x` actions. Logical states no gate for them. Processes
+  that are not builtin are also rejected.

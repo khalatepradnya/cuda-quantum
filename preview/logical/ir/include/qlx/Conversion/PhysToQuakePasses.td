@@ -32,6 +32,18 @@ def PhysToQuake : Pass<"phys-to-quake", "mlir::ModuleOp"> {
         `process` is `measure_x`, `h` comes before the measurement, and
         after it when the state survives. A destructive measurement ends
         with `quake.sink`.
+      - `phys.measure_product` collects the parity of its Pauli product on a
+        fresh ancilla: each operand is changed to Z around its CX into the
+        ancilla, and the ancilla is measured and freed. With `invert`, the
+        bit is complemented where it is read.
+      - `phys.rotate_product` is `exp(-i angle P / 2)`: basis changes and a
+        CX ladder around `rz`, or around `s`, `z`, or `sdg` when the angle is
+        a multiple of pi/2, so that Clifford rotations run on Stim.
+      - `phys.call` is inlined. `phys.call_template` replays the body of the
+        call that `template_event` names, on the carriers that
+        `state_aliases` maps the body's resources to. Each carrier's wire is
+        found through its resource, because the elided form advances
+        carriers without new SSA states.
       - Actions and instruments resolve in the graph's machine first, then
         in the module, as in the Phys verifier.
       - `phys.condition`, `phys.xor`, and `phys.all_false` become `i1` logic.
@@ -47,8 +59,9 @@ def PhysToQuake : Pass<"phys-to-quake", "mlir::ModuleOp"> {
     parameter.
 
     Any other form fails with a diagnostic on its operation. That covers
-    post-selection, resource and factory flows, code epoch transitions,
-    patch-granularity resources, quantum inputs, and non-Boolean results.
+    runtime control flow and retry, post-selection, resource and factory
+    flows, code epoch transitions, patch-granularity resources, parameterized
+    or non-builtin processes, quantum inputs, and non-Boolean results.
   }];
   let options = [
     Option<"entry", "entry", "std::string", /*default=*/"\"\"",

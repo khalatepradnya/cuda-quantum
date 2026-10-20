@@ -7,8 +7,8 @@
 // ========================================================================== //
 
 // REQUIRES: qlx-opt, cudaq-quake, cudaq-opt
-// RUN: qlx-opt --phys-to-quake=entry=entry %s | %cudaq_opt --pass-pipeline='builtin.module(codegen-for-qir{convert-to=qir})' | FileCheck %s --check-prefix=QIS
-// RUN: qlx-opt --phys-to-quake=entry=entry %s | %cudaq_opt --pass-pipeline='builtin.module(aot-prep-pipeline,codegen-for-qir{convert-to=qir-adaptive})' | FileCheck %s --check-prefix=PROFILE
+// RUN: qlx-opt --split-input-file --phys-to-quake=entry=entry %s | %cudaq_opt --split-input-file --pass-pipeline='builtin.module(codegen-for-qir{convert-to=qir})' | FileCheck %s --check-prefix=QIS
+// RUN: qlx-opt --split-input-file --phys-to-quake=entry=entry %s | %cudaq_opt --split-input-file --pass-pipeline='builtin.module(aot-prep-pipeline,codegen-for-qir{convert-to=qir-adaptive})' | FileCheck %s --check-prefix=PROFILE
 
 // The final QIS calls keep P3's allocation points and measurement basis.
 // @a is allocated at its acquire and released by its destructive
@@ -79,3 +79,56 @@ module attributes {quake.mangled_name_map = {__nvqpp__mlirgen__entry = "entry_ho
 // PROFILE-DAG:     llvm.mlir.global private constant @[[ELEMENT0]]("[0]\00")
 // PROFILE-DAG:     llvm.mlir.global private constant @[[ELEMENT1]]("[1]\00")
 // PROFILE-DAG:     llvm.mlir.global private constant @[[ELEMENT2]]("[2]\00")
+
+// -----
+
+// Each product measurement allocates its ancilla, changes each operand to Z
+// around the operand's CX into the ancilla, then measures and releases the
+// ancilla. The X@X parity is complete before Z@Y begins.
+module {
+  phys.instrument @mpp {kind = "measure_product", variadic, record_schema = "bit", preserves_inputs, process = "{\"kind\":\"builtin\",\"name\":\"measure_product\",\"parameters\":{}}"}
+  phys.machine @machine {
+    phys.resource_class @qubits {count = 2 : i64, kind = "qubit", native_actions = [], native_instruments = [@mpp]}
+  }
+  phys.resource @a {architecture = @machine, index = 0 : i64, kind = "qubit", resource_class = @qubits}
+  phys.resource @b {architecture = @machine, index = 1 : i64, kind = "qubit", resource_class = @qubits}
+  phys.graph @entry on @machine : () -> (!phys.record<@bit>, !phys.record<@bit>) {
+    %0:2 = phys.acquire [@a, @b] {event_id = "e0"} : !phys.state<@a>, !phys.state<@b>
+    %1:3 = phys.measure_product %0#0, %0#1 {event_id = "e1", instrument = @mpp, paulis = ["X", "X"], record_id = "xx"} : (!phys.state<@a>, !phys.state<@b>) -> (!phys.state<@a>, !phys.state<@b>, !phys.record<@bit>)
+    %2:3 = phys.measure_product %1#0, %1#1 {event_id = "e2", instrument = @mpp, paulis = ["Z", "Y"], record_id = "zy"} : (!phys.state<@a>, !phys.state<@b>) -> (!phys.state<@a>, !phys.state<@b>, !phys.record<@bit>)
+    phys.release %2#0, %2#1 {event_id = "e3"} : !phys.state<@a>, !phys.state<@b>
+    phys.return %1#2, %2#2 : !phys.record<@bit>, !phys.record<@bit>
+  }
+}
+
+// QIS-LABEL: llvm.func @__nvqpp__mlirgen__entry()
+// QIS:         %[[A:.*]] = llvm.call @__quantum__rt__qubit_allocate() : () -> !llvm.ptr
+// QIS-NEXT:    %[[B:.*]] = llvm.call @__quantum__rt__qubit_allocate() : () -> !llvm.ptr
+// QIS-NEXT:    %[[XX:.*]] = llvm.call @__quantum__rt__qubit_allocate() : () -> !llvm.ptr
+// QIS-NEXT:    llvm.call @__quantum__qis__h(%[[A]]) : (!llvm.ptr) -> ()
+// QIS-NEXT:    %[[C0:.*]] = llvm.bitcast %[[A]] : !llvm.ptr to !llvm.ptr
+// QIS:         %[[T0:.*]] = llvm.bitcast %[[XX]] : !llvm.ptr to !llvm.ptr
+// QIS-NEXT:    llvm.call @generalizedInvokeWithRotationsControlsTargets({{.*}}, %[[C0]], %[[T0]])
+// QIS-NEXT:    llvm.call @__quantum__qis__h(%[[A]]) : (!llvm.ptr) -> ()
+// QIS-NEXT:    llvm.call @__quantum__qis__h(%[[B]]) : (!llvm.ptr) -> ()
+// QIS-NEXT:    %[[C1:.*]] = llvm.bitcast %[[B]] : !llvm.ptr to !llvm.ptr
+// QIS:         %[[T1:.*]] = llvm.bitcast %[[XX]] : !llvm.ptr to !llvm.ptr
+// QIS-NEXT:    llvm.call @generalizedInvokeWithRotationsControlsTargets({{.*}}, %[[C1]], %[[T1]])
+// QIS-NEXT:    llvm.call @__quantum__qis__h(%[[B]]) : (!llvm.ptr) -> ()
+// QIS:         llvm.call @__quantum__qis__mz_handle__to__register(%[[XX]], %{{.*}}) {registerName = "r00000"} : (!llvm.ptr, !llvm.ptr) -> i64
+// QIS-NEXT:    llvm.call @__quantum__rt__qubit_release(%[[XX]]) : (!llvm.ptr) -> ()
+// QIS-NEXT:    %[[ZY:.*]] = llvm.call @__quantum__rt__qubit_allocate() : () -> !llvm.ptr
+// QIS-NEXT:    %[[C2:.*]] = llvm.bitcast %[[A]] : !llvm.ptr to !llvm.ptr
+// QIS:         %[[T2:.*]] = llvm.bitcast %[[ZY]] : !llvm.ptr to !llvm.ptr
+// QIS-NEXT:    llvm.call @generalizedInvokeWithRotationsControlsTargets({{.*}}, %[[C2]], %[[T2]])
+// QIS-NEXT:    llvm.call @__quantum__qis__s__adj(%[[B]]) : (!llvm.ptr) -> ()
+// QIS-NEXT:    llvm.call @__quantum__qis__h(%[[B]]) : (!llvm.ptr) -> ()
+// QIS-NEXT:    %[[C3:.*]] = llvm.bitcast %[[B]] : !llvm.ptr to !llvm.ptr
+// QIS:         %[[T3:.*]] = llvm.bitcast %[[ZY]] : !llvm.ptr to !llvm.ptr
+// QIS-NEXT:    llvm.call @generalizedInvokeWithRotationsControlsTargets({{.*}}, %[[C3]], %[[T3]])
+// QIS-NEXT:    llvm.call @__quantum__qis__h(%[[B]]) : (!llvm.ptr) -> ()
+// QIS-NEXT:    llvm.call @__quantum__qis__s(%[[B]]) : (!llvm.ptr) -> ()
+// QIS:         llvm.call @__quantum__qis__mz_handle__to__register(%[[ZY]], %{{.*}}) {registerName = "r00001"} : (!llvm.ptr, !llvm.ptr) -> i64
+// QIS-NEXT:    llvm.call @__quantum__rt__qubit_release(%[[ZY]]) : (!llvm.ptr) -> ()
+// QIS-NEXT:    llvm.call @__quantum__rt__qubit_release(%[[A]]) : (!llvm.ptr) -> ()
+// QIS-NEXT:    llvm.call @__quantum__rt__qubit_release(%[[B]]) : (!llvm.ptr) -> ()
