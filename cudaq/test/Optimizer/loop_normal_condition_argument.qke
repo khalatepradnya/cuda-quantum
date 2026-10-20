@@ -1,0 +1,42 @@
+// ========================================================================== //
+// Copyright (c) 2026 NVIDIA Corporation & Affiliates.                        //
+// All rights reserved.                                                       //
+//                                                                            //
+// This source code and the accompanying materials are made available under   //
+// the terms of the Apache License 2.0 which accompanies this distribution.   //
+// ========================================================================== //
+
+// RUN: cudaq-opt --cc-loop-normalize --cc-loop-unroll %s | FileCheck %s
+
+// The loop condition is a while-region argument, so it has no defining op.
+// Loop analysis must not classify the loop, and the passes leave it unchanged.
+
+func.func @__nvqpp__mlirgen__until_zero() -> i1 {
+  %true = arith.constant true
+  %0 = cc.loop while ((%arg0 = %true) -> (i1)) {
+    cc.condition %arg0(%arg0 : i1)
+  } do {
+  ^bb0(%arg0: i1):
+    %1 = quake.null_wire
+    %measOut, %wires = quake.mz %1 : (!quake.wire) -> (!cc.measure_handle, !quake.wire)
+    quake.sink %wires : !quake.wire
+    %2 = quake.discriminate %measOut : (!cc.measure_handle) -> i1
+    cc.continue %2 : i1
+  }
+  return %0 : i1
+}
+
+// CHECK-LABEL:   func.func @__nvqpp__mlirgen__until_zero() -> i1 {
+// CHECK:           %[[CONSTANT_0:.*]] = arith.constant true
+// CHECK:           %[[LOOP_0:.*]] = cc.loop while ((%[[VAL_0:.*]] = %[[CONSTANT_0]]) -> (i1)) {
+// CHECK:             cc.condition %[[VAL_0]](%[[VAL_0]] : i1)
+// CHECK:           } do {
+// CHECK:           ^bb0(%[[VAL_1:.*]]: i1):
+// CHECK:             %[[NULL_WIRE_0:.*]] = quake.null_wire
+// CHECK:             %[[VAL_2:.*]], %[[MZ_0:.*]] = quake.mz %[[NULL_WIRE_0]] : (!quake.wire) -> (!cc.measure_handle, !quake.wire)
+// CHECK:             quake.sink %[[MZ_0]] : !quake.wire
+// CHECK:             %[[DISCRIMINATE_0:.*]] = quake.discriminate %[[VAL_2]] : (!cc.measure_handle) -> i1
+// CHECK:             cc.continue %[[DISCRIMINATE_0]] : i1
+// CHECK:           }
+// CHECK:           return %[[LOOP_0]] : i1
+// CHECK:         }

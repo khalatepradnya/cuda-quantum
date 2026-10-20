@@ -360,3 +360,119 @@ module {
 // CHECK:           %[[DISCRIMINATE_1:.*]] = quake.discriminate %[[VAL_1]] : (!cc.measure_handle) -> i1
 // CHECK:           %[[CONSTANT_1:.*]] = arith.constant true
 // CHECK:           %[[XORI_0:.*]] = arith.xori %[[DISCRIMINATE_1]], %[[CONSTANT_1]] : i1
+
+// -----
+
+// Control flow carries every live carrier's wire, then its classical values.
+// A record crosses a region boundary as its `i1`. The branch acquires and
+// releases @c inside itself. `cflow.repeat` counts with an `i64`, so a count
+// of 0 runs no iteration. `cflow.while` tests the carried `i1` itself.
+module {
+  phys.machine @m {
+    phys.resource_class @q {count = 3 : i64, kind = "qubit", native_actions = [@x, @h], native_instruments = [@mz]}
+  }
+  phys.action @x {arity = 1 : i64, process = "{\"kind\":\"builtin\",\"name\":\"x\",\"parameters\":{}}"}
+  phys.action @h {arity = 1 : i64, process = "{\"kind\":\"builtin\",\"name\":\"h\",\"parameters\":{}}"}
+  phys.instrument @mz {arity = 1 : i64, kind = "measure", preserves_inputs, process = "{\"kind\":\"builtin\",\"name\":\"measure_z\",\"parameters\":{}}", record_schema = "bit"}
+  phys.resource @a {index = 0 : i64, kind = "qubit", resource_class = @q}
+  phys.resource @b {index = 1 : i64, kind = "qubit", resource_class = @q}
+  phys.resource @c {index = 2 : i64, kind = "qubit", resource_class = @q}
+  phys.graph @entry on @m : () -> (!phys.record<@bit>, !phys.record<@bit>, i1) {
+    %0 = phys.acquire [@a] {event_id = "acquire_a"} : !phys.state<@a>
+    %1 = phys.apply @h(%0) {event_id = "h"} : (!phys.state<@a>) -> !phys.state<@a>
+    %2, %first = phys.measure @mz(%1) {event_id = "first", record_id = "first"} : (!phys.state<@a>) -> (!phys.state<@a>, !phys.record<@bit>)
+    %3 = phys.condition %first {event_id = "cond"} : !phys.record<@bit> -> i1
+    %4:2 = cflow.if %3 event_id = "if" -> !phys.state<@a>, !phys.record<@bit> {
+      %5 = phys.apply @x(%2) {event_id = "fix"} : (!phys.state<@a>) -> !phys.state<@a>
+      %6 = phys.acquire [@c] {event_id = "acquire_c"} : !phys.state<@c>
+      %flag = phys.measure @mz(%6) {destructive, event_id = "flag", record_id = "flag"} : (!phys.state<@c>) -> !phys.record<@bit>
+      cflow.yield %5, %flag : !phys.state<@a>, !phys.record<@bit>
+    } else {
+      cflow.yield %2, %first : !phys.state<@a>, !phys.record<@bit>
+    }
+    %7 = phys.acquire [@b] {event_id = "acquire_b"} : !phys.state<@b>
+    %8:2 = cflow.repeat 2 iter(%s: !phys.state<@b> = %7, %r: !phys.record<@bit> = %4#1) event_id = "repeat" {
+      %9 = phys.apply @x(%s) {event_id = "flip"} : (!phys.state<@b>) -> !phys.state<@b>
+      %10, %m = phys.measure @mz(%9) {event_id = "m", record_id = "m"} : (!phys.state<@b>) -> (!phys.state<@b>, !phys.record<@bit>)
+      cflow.yield %10, %m : !phys.state<@b>, !phys.record<@bit>
+    }
+    %11 = cflow.repeat 0 iter(%s: !phys.state<@b> = %8#0) event_id = "never" {
+      %12 = phys.apply @x(%s) {event_id = "never_x"} : (!phys.state<@b>) -> !phys.state<@b>
+      cflow.yield %12 : !phys.state<@b>
+    }
+    %true = arith.constant true
+    %13:2 = cflow.while(%4#0, %true) event_id = "while" : (!phys.state<@a>, i1) -> (!phys.state<@a>, i1) {
+    ^bb0(%s: !phys.state<@a>, %go: i1):
+      cflow.while_condition %go, %s, %go : !phys.state<@a>, i1
+    } do {
+    ^bb0(%s: !phys.state<@a>, %go: i1):
+      %14 = phys.apply @h(%s) {event_id = "retry_h"} : (!phys.state<@a>) -> !phys.state<@a>
+      %15, %again = phys.measure @mz(%14) {event_id = "again", record_id = "again"} : (!phys.state<@a>) -> (!phys.state<@a>, !phys.record<@bit>)
+      %16 = phys.condition %again {event_id = "again_bit"} : !phys.record<@bit> -> i1
+      cflow.yield %15, %16 : !phys.state<@a>, i1
+    }
+    phys.release %13#0, %11 {event_id = "release"} : !phys.state<@a>, !phys.state<@b>
+    phys.return %4#1, %8#1, %13#1 : !phys.record<@bit>, !phys.record<@bit>, i1
+  }
+}
+
+// CHECK-LABEL:   func.func @__nvqpp__mlirgen__entry() -> !cc.sequence<i1> attributes {"cudaq-entrypoint", "cudaq-kernel"} {
+// CHECK:           %[[NULL_WIRE_0:.*]] = quake.null_wire
+// CHECK:           %[[H_0:.*]] = quake.h %[[NULL_WIRE_0]] : (!quake.wire) -> !quake.wire
+// CHECK:           %[[VAL_0:.*]], %[[MZ_0:.*]] = quake.mz %[[H_0]] : (!quake.wire) -> (!cc.measure_handle, !quake.wire)
+// CHECK:           %[[DISCRIMINATE_0:.*]] = quake.discriminate %[[VAL_0]] : (!cc.measure_handle) -> i1
+// CHECK:           %[[IF_0:.*]]:2 = cc.if(%[[DISCRIMINATE_0]]) ((%[[VAL_1:.*]] = %[[MZ_0]])) -> (!quake.wire, i1) {
+// CHECK:             %[[X_0:.*]] = quake.x %[[VAL_1]] : (!quake.wire) -> !quake.wire
+// CHECK:             %[[NULL_WIRE_1:.*]] = quake.null_wire
+// CHECK:             %[[VAL_2:.*]], %[[MZ_1:.*]] = quake.mz %[[NULL_WIRE_1]] : (!quake.wire) -> (!cc.measure_handle, !quake.wire)
+// CHECK:             quake.sink %[[MZ_1]] : !quake.wire
+// CHECK:             %[[DISCRIMINATE_1:.*]] = quake.discriminate %[[VAL_2]] : (!cc.measure_handle) -> i1
+// CHECK:             cc.continue %[[X_0]], %[[DISCRIMINATE_1]] : !quake.wire, i1
+// CHECK:           } else {
+// CHECK:             cc.continue %[[VAL_3:.*]], %[[DISCRIMINATE_0]] : !quake.wire, i1
+// CHECK:           }
+// CHECK:           %[[NULL_WIRE_2:.*]] = quake.null_wire
+// CHECK:           %[[CONSTANT_0:.*]] = arith.constant 2 : i64
+// CHECK:           %[[CONSTANT_1:.*]] = arith.constant 0 : i64
+// CHECK:           %[[LOOP_0:.*]]:4 = cc.loop while ((%[[VAL_4:.*]] = %[[CONSTANT_1]], %[[VAL_5:.*]] = %[[VAL_6:.*]]#0, %[[VAL_7:.*]] = %[[NULL_WIRE_2]], %[[VAL_8:.*]] = %[[VAL_6]]#1) -> (i64, !quake.wire, !quake.wire, i1)) {
+// CHECK:             %[[CMPI_0:.*]] = arith.cmpi slt, %[[VAL_4]], %[[CONSTANT_0]] : i64
+// CHECK:             cc.condition %[[CMPI_0]](%[[VAL_4]], %[[VAL_5]], %[[VAL_7]], %[[VAL_8]] : i64, !quake.wire, !quake.wire, i1)
+// CHECK:           } do {
+// CHECK:           ^bb0(%[[VAL_9:.*]]: i64, %[[VAL_10:.*]]: !quake.wire, %[[VAL_11:.*]]: !quake.wire, %[[VAL_12:.*]]: i1):
+// CHECK:             %[[X_1:.*]] = quake.x %[[VAL_11]] : (!quake.wire) -> !quake.wire
+// CHECK:             %[[VAL_13:.*]], %[[MZ_2:.*]] = quake.mz %[[X_1]] : (!quake.wire) -> (!cc.measure_handle, !quake.wire)
+// CHECK:             %[[DISCRIMINATE_2:.*]] = quake.discriminate %[[VAL_13]] : (!cc.measure_handle) -> i1
+// CHECK:             cc.continue %[[VAL_9]], %[[VAL_10]], %[[MZ_2]], %[[DISCRIMINATE_2]] : i64, !quake.wire, !quake.wire, i1
+// CHECK:           } step {
+// CHECK:           ^bb0(%[[VAL_14:.*]]: i64, %[[VAL_15:.*]]: !quake.wire, %[[VAL_16:.*]]: !quake.wire, %[[VAL_17:.*]]: i1):
+// CHECK:             %[[CONSTANT_2:.*]] = arith.constant 1 : i64
+// CHECK:             %[[ADDI_0:.*]] = arith.addi %[[VAL_14]], %[[CONSTANT_2]] : i64
+// CHECK:             cc.continue %[[ADDI_0]], %[[VAL_15]], %[[VAL_16]], %[[VAL_17]] : i64, !quake.wire, !quake.wire, i1
+// CHECK:           }
+// CHECK:           %[[CONSTANT_3:.*]] = arith.constant 0 : i64
+// CHECK:           %[[CONSTANT_4:.*]] = arith.constant 0 : i64
+// CHECK:           %[[LOOP_1:.*]]:3 = cc.loop while ((%[[VAL_18:.*]] = %[[CONSTANT_4]], %[[VAL_19:.*]] = %[[VAL_20:.*]]#1, %[[VAL_21:.*]] = %[[VAL_20]]#2) -> (i64, !quake.wire, !quake.wire)) {
+// CHECK:             %[[CMPI_1:.*]] = arith.cmpi slt, %[[VAL_18]], %[[CONSTANT_3]] : i64
+// CHECK:             cc.condition %[[CMPI_1]](%[[VAL_18]], %[[VAL_19]], %[[VAL_21]] : i64, !quake.wire, !quake.wire)
+// CHECK:           } do {
+// CHECK:           ^bb0(%[[VAL_22:.*]]: i64, %[[VAL_23:.*]]: !quake.wire, %[[VAL_24:.*]]: !quake.wire):
+// CHECK:             %[[X_2:.*]] = quake.x %[[VAL_24]] : (!quake.wire) -> !quake.wire
+// CHECK:             cc.continue %[[VAL_22]], %[[VAL_23]], %[[X_2]] : i64, !quake.wire, !quake.wire
+// CHECK:           } step {
+// CHECK:           ^bb0(%[[VAL_25:.*]]: i64, %[[VAL_26:.*]]: !quake.wire, %[[VAL_27:.*]]: !quake.wire):
+// CHECK:             %[[CONSTANT_5:.*]] = arith.constant 1 : i64
+// CHECK:             %[[ADDI_1:.*]] = arith.addi %[[VAL_25]], %[[CONSTANT_5]] : i64
+// CHECK:             cc.continue %[[ADDI_1]], %[[VAL_26]], %[[VAL_27]] : i64, !quake.wire, !quake.wire
+// CHECK:           }
+// CHECK:           %[[CONSTANT_6:.*]] = arith.constant true
+// CHECK:           %[[LOOP_2:.*]]:3 = cc.loop while ((%[[VAL_28:.*]] = %[[VAL_29:.*]]#1, %[[VAL_30:.*]] = %[[VAL_29]]#2, %[[VAL_31:.*]] = %[[CONSTANT_6]]) -> (!quake.wire, !quake.wire, i1)) {
+// CHECK:             cc.condition %[[VAL_31]](%[[VAL_28]], %[[VAL_30]], %[[VAL_31]] : !quake.wire, !quake.wire, i1)
+// CHECK:           } do {
+// CHECK:           ^bb0(%[[VAL_32:.*]]: !quake.wire, %[[VAL_33:.*]]: !quake.wire, %[[VAL_34:.*]]: i1):
+// CHECK:             %[[H_1:.*]] = quake.h %[[VAL_32]] : (!quake.wire) -> !quake.wire
+// CHECK:             %[[VAL_35:.*]], %[[MZ_3:.*]] = quake.mz %[[H_1]] : (!quake.wire) -> (!cc.measure_handle, !quake.wire)
+// CHECK:             %[[DISCRIMINATE_3:.*]] = quake.discriminate %[[VAL_35]] : (!cc.measure_handle) -> i1
+// CHECK:             cc.continue %[[MZ_3]], %[[VAL_33]], %[[DISCRIMINATE_3]] : !quake.wire, !quake.wire, i1
+// CHECK:           }
+// CHECK:           quake.sink %[[VAL_36:.*]]#0 : !quake.wire
+// CHECK:           quake.sink %[[VAL_36]]#1 : !quake.wire

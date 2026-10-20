@@ -37,7 +37,7 @@ Every row cites its exercising evidence in this repository.
 | Analytical and schedule estimation                                                                                                                      | shipped, exercised | `examples/02_surface_code_resource_estimate.py`, `examples/standalone/04_physical_schedule.py`, `examples/standalone/05_gidney_ekera_lookup_addition.py` |
 | Paper-specific Gidney–Ekerå RSA-2048/3072/4096 projection                                                                                               | shipped, exercised | `examples/05_gidney_ekera.py`                                                                                          |
 | Stim text emission — the `--fabric-to-stim` translation                                                                                                 | shipped, exercised | `examples/mlir/stim_memory.mlir` via `qlx-translate`; Stim-emission tests                                               |
-| P3 execution — `cudaq.run` on a physical Build without runtime control flow that returns Booleans, including gadget calls and product measurements and rotations, with and without a noise model | shipped, exercised | `examples/standalone/06_run_physical_programs.py`; `test_run_physical.py` |
+| P3 execution — `cudaq.run` on a physical Build that returns Booleans, including gadget calls, product measurements and rotations, and runtime branches and loops, with and without a noise model | shipped, exercised | `examples/standalone/06_run_physical_programs.py`; `test_run_physical.py` |
 
 ## Present but not yet exercised
 
@@ -62,9 +62,9 @@ emits, not to these timing assumptions.
 
 **Stages stop at P3.** P3 represents physical carriers, routing, native events,
 and schedules. CUDA-Q Logical does not submit a physical schedule to hardware.
-`cudaq.run` runs a P3 Build without runtime control flow that returns
-Booleans on a CUDA-Q simulator, in program order and without its schedule's
-timing. Runtime control flow and retry do not run yet.
+`cudaq.run` runs a P3 Build that returns Booleans on a CUDA-Q simulator, in
+program order and without its schedule's timing. Retry and post-selection do
+not run yet.
 [Run physical programs](../use-cases/run-physical-programs.md) states the
 limits.
 

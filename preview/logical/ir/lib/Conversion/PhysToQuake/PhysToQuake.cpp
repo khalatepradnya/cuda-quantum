@@ -11,6 +11,7 @@
 // realization. PhysToQuakePasses.td states the translation rules.
 
 #include "qlx/Conversion/PhysToQuakePasses.h"
+#include "qlx/Dialect/Cflow/IR/CflowOps.h"
 #include "qlx/Dialect/Event/IR/EventOps.h"
 #include "qlx/Dialect/Phys/IR/PhysOps.h"
 
@@ -180,6 +181,17 @@ private:
   LogicalResult lowerCallTemplate(phys::CallTemplateOp op);
   LogicalResult lowerBody(phys::CallOp call, ValueRange inputs,
                           ValueRange outputs);
+  LogicalResult lowerIf(qlx::cflow::IfOp op);
+  LogicalResult lowerRepeat(qlx::cflow::RepeatOp op);
+  LogicalResult lowerWhile(qlx::cflow::WhileOp op);
+  LogicalResult lowerOps(Block &block);
+  SmallVector<Attribute> liveCarriers();
+  void enterRegion(ValueRange arguments, ArrayRef<Attribute> carriers,
+                   ValueRange physArguments);
+  SmallVector<Value> carriedValues(ArrayRef<Attribute> carriers,
+                                   ValueRange physValues);
+  void mapResults(ArrayRef<Attribute> carriers, ValueRange physResults,
+                  ValueRange results);
   LogicalResult lowerCondition(phys::ConditionOp op);
   LogicalResult lowerAllFalse(phys::AllFalseOp op);
   LogicalResult lowerReturn(phys::ReturnOp op);
@@ -321,6 +333,9 @@ LogicalResult GraphLowering::lowerOp(Operation *op) {
       .Case([&](phys::CallTemplateOp invocation) {
         return lowerCallTemplate(invocation);
       })
+      .Case([&](qlx::cflow::IfOp ifOp) { return lowerIf(ifOp); })
+      .Case([&](qlx::cflow::RepeatOp repeat) { return lowerRepeat(repeat); })
+      .Case([&](qlx::cflow::WhileOp loop) { return lowerWhile(loop); })
       .Case([&](phys::ConditionOp condition) {
         return lowerCondition(condition);
       })
@@ -601,9 +616,8 @@ LogicalResult GraphLowering::lowerBody(phys::CallOp call, ValueRange inputs,
   for (auto [argument, input] : llvm::zip(body.getArguments(), inputs))
     if (!isa<phys::StateType>(argument.getType()))
       values.map(argument, values.lookup(input));
-  for (Operation &op : body.without_terminator())
-    if (failed(lowerOp(&op)))
-      return failure();
+  if (failed(lowerOps(body)))
+    return failure();
   auto yield = cast<phys::YieldOp>(body.getTerminator());
   for (auto [yielded, output] : llvm::zip(yield.getOperands(), outputs))
     if (!isa<phys::StateType>(yielded.getType()))
@@ -635,6 +649,234 @@ LogicalResult GraphLowering::lowerCallTemplate(phys::CallTemplateOp op) {
           : lowerBody(canonical, op.getInputs(), op.getOutputs());
   aliases = std::move(enclosing);
   return lowered;
+}
+
+LogicalResult GraphLowering::lowerOps(Block &block) {
+  for (Operation &op : block.without_terminator())
+    if (failed(lowerOp(&op)))
+      return failure();
+  return success();
+}
+
+/// The live carriers in resource-name order, so that the Quake is
+/// deterministic.
+SmallVector<Attribute> GraphLowering::liveCarriers() {
+  SmallVector<Attribute> carriers(llvm::make_first_range(wires));
+  llvm::sort(carriers, [](Attribute lhs, Attribute rhs) {
+    return cast<FlatSymbolRefAttr>(lhs).getValue() <
+           cast<FlatSymbolRefAttr>(rhs).getValue();
+  });
+  return carriers;
+}
+
+// Control flow carries every live carrier's wire through the Quake region,
+// followed by the cflow op's classical values. A record crosses a region
+// boundary as its `i1`, which `toBoolean` complements for an inverted product.
+// States need no mapping inside a region, because each keeps its resource.
+//
+//   cflow.if %c -> (state<@a>, record)      %r:2 = cc.if(%c) ((%w = %a)) {
+//     ...                              =>     ...
+//     cflow.yield %a2, %m                     cc.continue %w2, %bit
+//   } else { ... }                          } else { ... }
+
+/// Maps a region's arguments: `arguments` holds the carriers' wires, then the
+/// carried values of `physArguments`.
+void GraphLowering::enterRegion(ValueRange arguments,
+                                ArrayRef<Attribute> carriers,
+                                ValueRange physArguments) {
+  for (auto [carrier, wire] : llvm::zip(carriers, arguments))
+    wires[carrier] = wire;
+  ValueRange carried = arguments.drop_front(carriers.size());
+  for (Value physArgument : physArguments)
+    if (!isa<phys::StateType>(physArgument.getType())) {
+      values.map(physArgument, carried.front());
+      carried = carried.drop_front();
+    }
+}
+
+/// The carriers' wires, then the carried values of `physValues`.
+SmallVector<Value> GraphLowering::carriedValues(ArrayRef<Attribute> carriers,
+                                                ValueRange physValues) {
+  SmallVector<Value> carried;
+  for (Attribute carrier : carriers)
+    carried.push_back(wires.lookup(carrier));
+  for (Value physValue : physValues) {
+    if (isa<phys::StateType>(physValue.getType()))
+      continue;
+    carried.push_back(isa<phys::RecordType>(physValue.getType())
+                          ? toBoolean(physValue)
+                          : values.lookup(physValue));
+  }
+  return carried;
+}
+
+void GraphLowering::mapResults(ArrayRef<Attribute> carriers,
+                               ValueRange physResults, ValueRange results) {
+  wires.clear();
+  for (auto [carrier, wire] : llvm::zip(carriers, results))
+    wires[carrier] = wire;
+  ValueRange carried = results.drop_front(carriers.size());
+  for (Value physResult : physResults)
+    if (!isa<phys::StateType>(physResult.getType())) {
+      values.map(physResult, carried.front());
+      carried = carried.drop_front();
+    }
+}
+
+LogicalResult GraphLowering::lowerIf(qlx::cflow::IfOp op) {
+  Location loc = op.getLoc();
+  Value condition = values.lookup(op.getCondition());
+  SmallVector<Attribute> carriers = liveCarriers();
+  SmallVector<Value> linearArgs = carriedValues(carriers, {});
+  // Mappings made in a branch do not dominate the code after the `cc.if`.
+  IRMapping outerValues = values;
+  DenseMap<Attribute, Value> outerWires = wires;
+  // The result types follow from the branches, so they are lowered into a
+  // scratch `cc.if` whose regions then move to the final one.
+  auto noRegion = [](OpBuilder &, Location, Region &) {};
+  auto scratch = cc::IfOp::create(builder, loc, TypeRange{}, condition,
+                                  linearArgs, noRegion, noRegion);
+  // The Phys verifier makes both branches consume and yield the same states,
+  // so both end with the same carriers.
+  SmallVector<Attribute> exitCarriers;
+  SmallVector<Type> resultTypes;
+  for (auto [source, target] :
+       llvm::zip(op->getRegions(), scratch->getRegions())) {
+    values = outerValues;
+    wires = outerWires;
+    Block *block = new Block();
+    target.push_back(block);
+    for (Value wire : linearArgs)
+      block->addArgument(wire.getType(), loc);
+    enterRegion(block->getArguments(), carriers, {});
+    builder.setInsertionPointToStart(block);
+    if (failed(lowerOps(source.front())))
+      return failure();
+    exitCarriers = liveCarriers();
+    SmallVector<Value> continued = carriedValues(
+        exitCarriers, source.front().getTerminator()->getOperands());
+    resultTypes = llvm::to_vector(ValueRange(continued).getTypes());
+    cc::ContinueOp::create(builder, loc, continued);
+  }
+  builder.setInsertionPoint(scratch);
+  auto ifOp = cc::IfOp::create(
+      builder, loc, resultTypes, condition, linearArgs,
+      [&](OpBuilder &, Location, Region &region) {
+        region.takeBody(scratch.getThenRegion());
+      },
+      [&](OpBuilder &, Location, Region &region) {
+        region.takeBody(scratch.getElseRegion());
+      });
+  scratch.erase();
+  builder.setInsertionPointAfter(ifOp);
+  values = std::move(outerValues);
+  mapResults(exitCarriers, op.getResults(), ifOp.getResults());
+  return success();
+}
+
+LogicalResult GraphLowering::lowerRepeat(qlx::cflow::RepeatOp op) {
+  Location loc = op.getLoc();
+  SmallVector<Attribute> carriers = liveCarriers();
+  Value count = arith::ConstantIntOp::create(builder, loc, op.getCount(), 64);
+  SmallVector<Value> iterArgs{
+      arith::ConstantIntOp::create(builder, loc, 0, 64)};
+  llvm::append_range(iterArgs, carriedValues(carriers, op.getInits()));
+  auto types = llvm::to_vector(ValueRange(iterArgs).getTypes());
+  IRMapping outerValues = values;
+  Block &body = op.getBody().front();
+  LogicalResult lowered = success();
+  // The Phys verifier makes the body yield every state it receives, so each
+  // iteration ends with the carriers it began with.
+  auto loop = cc::LoopOp::create(
+      builder, loc, types, iterArgs, /*postCond=*/false,
+      [&](OpBuilder &builder, Location loc, Region &region) {
+        cc::RegionBuilderGuard guard(builder, loc, region, types);
+        Block &block = *builder.getBlock();
+        Value more =
+            arith::CmpIOp::create(builder, loc, arith::CmpIPredicate::slt,
+                                  block.getArgument(0), count);
+        cc::ConditionOp::create(builder, loc, more, block.getArguments());
+      },
+      [&](OpBuilder &builder, Location loc, Region &region) {
+        cc::RegionBuilderGuard guard(builder, loc, region, types);
+        Block &block = *builder.getBlock();
+        enterRegion(block.getArguments().drop_front(), carriers,
+                    body.getArguments());
+        lowered = lowerOps(body);
+        if (failed(lowered))
+          return;
+        SmallVector<Value> continued{block.getArgument(0)};
+        llvm::append_range(
+            continued,
+            carriedValues(carriers, body.getTerminator()->getOperands()));
+        cc::ContinueOp::create(builder, loc, continued);
+      },
+      [&](OpBuilder &builder, Location loc, Region &region) {
+        cc::RegionBuilderGuard guard(builder, loc, region, types);
+        Block &block = *builder.getBlock();
+        SmallVector<Value> next(block.getArguments());
+        next.front() = arith::AddIOp::create(
+            builder, loc, next.front(),
+            arith::ConstantIntOp::create(builder, loc, 1, 64));
+        cc::ContinueOp::create(builder, loc, next);
+      });
+  if (failed(lowered))
+    return failure();
+  values = std::move(outerValues);
+  mapResults(carriers, op.getResults(), loop.getResults().drop_front());
+  return success();
+}
+
+LogicalResult GraphLowering::lowerWhile(qlx::cflow::WhileOp op) {
+  if (op.getMaxIterationsAttr())
+    return op.emitOpError(
+        "bounds the loop by max_iterations, and Logical does not define what "
+        "happens at the bound");
+  Location loc = op.getLoc();
+  SmallVector<Attribute> carriers = liveCarriers();
+  SmallVector<Value> iterArgs = carriedValues(carriers, op.getInits());
+  auto types = llvm::to_vector(ValueRange(iterArgs).getTypes());
+  IRMapping outerValues = values;
+  Block &before = op.getBeforeRegion().front();
+  Block &after = op.getAfterRegion().front();
+  LogicalResult lowered = success();
+  // Each region starts from the outer mappings: a Boolean read in the
+  // condition does not dominate the body.
+  auto loop = cc::LoopOp::create(
+      builder, loc, types, iterArgs, /*postCond=*/false,
+      [&](OpBuilder &builder, Location loc, Region &region) {
+        cc::RegionBuilderGuard guard(builder, loc, region, types);
+        Block &block = *builder.getBlock();
+        values = outerValues;
+        enterRegion(block.getArguments(), carriers, before.getArguments());
+        lowered = lowerOps(before);
+        if (failed(lowered))
+          return;
+        auto condition =
+            cast<qlx::cflow::WhileConditionOp>(before.getTerminator());
+        cc::ConditionOp::create(
+            builder, loc, values.lookup(condition.getCondition()),
+            carriedValues(carriers, condition.getForwarded()));
+      },
+      [&](OpBuilder &builder, Location loc, Region &region) {
+        cc::RegionBuilderGuard guard(builder, loc, region, types);
+        Block &block = *builder.getBlock();
+        if (failed(lowered))
+          return;
+        values = outerValues;
+        enterRegion(block.getArguments(), carriers, after.getArguments());
+        lowered = lowerOps(after);
+        if (failed(lowered))
+          return;
+        cc::ContinueOp::create(
+            builder, loc,
+            carriedValues(carriers, after.getTerminator()->getOperands()));
+      });
+  if (failed(lowered))
+    return failure();
+  values = std::move(outerValues);
+  mapResults(carriers, op.getResults(), loop.getResults());
+  return success();
 }
 
 /// Records are not linear, so a record that several ops read is discriminated

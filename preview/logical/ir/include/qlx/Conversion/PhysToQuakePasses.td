@@ -44,6 +44,11 @@ def PhysToQuake : Pass<"phys-to-quake", "mlir::ModuleOp"> {
         `state_aliases` maps the body's resources to. Each carrier's wire is
         found through its resource, because the elided form advances
         carriers without new SSA states.
+      - `cflow.if` becomes `cc.if`, and `cflow.repeat` and `cflow.while`
+        become `cc.loop`. Each carries every live carrier's wire, then its
+        classical values. A record crosses a region boundary as its `i1`.
+        A `cflow.while` with `max_iterations` is rejected, because Logical
+        does not define what happens at the bound.
       - Actions and instruments resolve in the graph's machine first, then
         in the module, as in the Phys verifier.
       - `phys.condition`, `phys.xor`, and `phys.all_false` become `i1` logic.
@@ -59,7 +64,7 @@ def PhysToQuake : Pass<"phys-to-quake", "mlir::ModuleOp"> {
     parameter.
 
     Any other form fails with a diagnostic on its operation. That covers
-    runtime control flow and retry, post-selection, resource and factory
+    retry, post-selection, resource and factory
     flows, code epoch transitions, patch-granularity resources, parameterized
     or non-builtin processes, quantum inputs, and non-Boolean results.
   }];

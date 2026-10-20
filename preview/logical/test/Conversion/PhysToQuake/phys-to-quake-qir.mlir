@@ -132,3 +132,51 @@ module {
 // QIS-NEXT:    llvm.call @__quantum__rt__qubit_release(%[[ZY]]) : (!llvm.ptr) -> ()
 // QIS-NEXT:    llvm.call @__quantum__rt__qubit_release(%[[A]]) : (!llvm.ptr) -> ()
 // QIS-NEXT:    llvm.call @__quantum__rt__qubit_release(%[[B]]) : (!llvm.ptr) -> ()
+
+// -----
+
+// A dynamic loop keeps its back-edge: the body measures again and returns to
+// the condition, which reads the new bit. The loop exits only on 0, so the
+// returned record folds to `false`.
+module {
+  phys.machine @machine {
+    phys.resource_class @qubits {count = 1 : i64, kind = "qubit", native_actions = [@h], native_instruments = [@mz]}
+  }
+  phys.action @h {arity = 1 : i64, process = "{\"kind\":\"builtin\",\"name\":\"h\",\"parameters\":{}}"}
+  phys.instrument @mz {arity = 1 : i64, kind = "measure", preserves_inputs, process = "{\"kind\":\"builtin\",\"name\":\"measure_z\",\"parameters\":{}}", record_schema = "bit"}
+  phys.resource @a {architecture = @machine, index = 0 : i64, kind = "qubit", resource_class = @qubits}
+  phys.graph @entry on @machine : () -> !phys.record<@bit> {
+    %0 = phys.acquire [@a] {event_id = "e0"} : !phys.state<@a>
+    %1 = phys.apply @h(%0) {event_id = "h0"} : (!phys.state<@a>) -> !phys.state<@a>
+    %2, %first = phys.measure @mz(%1) {event_id = "m0", record_id = "m"} : (!phys.state<@a>) -> (!phys.state<@a>, !phys.record<@bit>)
+    %3:2 = cflow.while(%2, %first) event_id = "until_zero" : (!phys.state<@a>, !phys.record<@bit>) -> (!phys.state<@a>, !phys.record<@bit>) {
+    ^bb0(%s: !phys.state<@a>, %r: !phys.record<@bit>):
+      %one = phys.condition %r {event_id = "is_one"} : !phys.record<@bit> -> i1
+      cflow.while_condition %one, %s, %r : !phys.state<@a>, !phys.record<@bit>
+    } do {
+    ^bb0(%s: !phys.state<@a>, %r: !phys.record<@bit>):
+      %4 = phys.apply @h(%s) {event_id = "h1"} : (!phys.state<@a>) -> !phys.state<@a>
+      %5, %m = phys.measure @mz(%4) {event_id = "m1", record_id = "m"} : (!phys.state<@a>) -> (!phys.state<@a>, !phys.record<@bit>)
+      cflow.yield %5, %m : !phys.state<@a>, !phys.record<@bit>
+    }
+    phys.release %3#0 {event_id = "e1"} : !phys.state<@a>
+    phys.return %3#1 : !phys.record<@bit>
+  }
+}
+
+// QIS-LABEL: llvm.func @__nvqpp__mlirgen__entry()
+// QIS:         %[[A:.*]] = llvm.call @__quantum__rt__qubit_allocate() : () -> !llvm.ptr
+// QIS-NEXT:    llvm.call @__quantum__qis__h(%[[A]]) : (!llvm.ptr) -> ()
+// QIS:         llvm.call @__quantum__qis__mz_handle__to__register(%[[A]], %{{.*}}) {registerName = "r00000"} : (!llvm.ptr, !llvm.ptr) -> i64
+// QIS:         %[[FIRST:.*]] = llvm.call @__quantum__rt__read_result(%{{.*}}) : (!llvm.ptr) -> i1
+// QIS-NEXT:    llvm.br ^[[COND:.*]](%[[A]], %[[FIRST]] : !llvm.ptr, i1)
+// QIS:       ^[[COND]](%[[Q:.*]]: !llvm.ptr, %[[ONE:.*]]: i1):
+// QIS-NEXT:    llvm.cond_br %[[ONE]], ^[[BODY:.*]], ^[[EXIT:[^ ]*]]
+// QIS:       ^[[BODY]]:
+// QIS-NEXT:    llvm.call @__quantum__qis__h(%[[Q]]) : (!llvm.ptr) -> ()
+// QIS:         llvm.call @__quantum__qis__mz_handle__to__register(%[[Q]], %{{.*}}) {registerName = "r00001"} : (!llvm.ptr, !llvm.ptr) -> i64
+// QIS:         %[[AGAIN:.*]] = llvm.call @__quantum__rt__read_result(%{{.*}}) : (!llvm.ptr) -> i1
+// QIS-NEXT:    llvm.br ^[[COND]](%[[Q]], %[[AGAIN]] : !llvm.ptr, i1)
+// QIS:       ^[[EXIT]]:
+// QIS-NEXT:    llvm.call @__quantum__rt__qubit_release(%[[Q]]) : (!llvm.ptr) -> ()
+

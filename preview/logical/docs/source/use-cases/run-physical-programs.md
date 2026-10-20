@@ -61,6 +61,10 @@ without a result. Arguments pass as they do for an ordinary kernel. A Logical
   place of `rz`, so that Clifford rotations run on `stim`.
 - A gadget call runs its body in place. A repeated call, which P3 states as a
   call template, runs the same body on its own qubits.
+- Runtime control flow runs at run time: `cql.ops.cond` branches on a
+  measured bit, and `cql.ops.repeat` repeats its body. A qubit allocated
+  inside a branch is freed inside it. `cflow.while` loops until its
+  condition reads 0.
 - `delay`, `barrier`, `move`, and `fence` emit no gates.
 
 `print(build.to_quake())` shows the exact circuit. Each call returns a new
@@ -85,9 +89,8 @@ module, and the Build does not change.
 `to_quake()` raises an error that names the first operation it cannot
 translate. These forms do not translate:
 
-- Runtime control flow (`cflow.if`, `cflow.repeat`, `cflow.while`), such as
-  `cql.ops.cond` and `cql.ops.repeat` in a protocol. A Python loop or branch
-  in the authoring code produces straight-line P3 and runs.
+- A `cflow.while` with `max_iterations`. Logical does not define what
+  happens when the loop reaches the bound.
 - Retry, post-selection, resource and factory flows, and code epoch
   transitions.
 - Patch-granularity resources, where one state stands for a whole code patch.

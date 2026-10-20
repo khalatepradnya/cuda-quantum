@@ -318,8 +318,9 @@ def bare_device():
     architecture = cql.devices.QECArchitecture(
         "run_physical_bare_architecture",
         BARE.default_encoding,
-        link_roots=(gadgets.prepare_zero(BARE), gadgets.measure_z(BARE),
-                    bare_measure_x, bare_x, bare_h, bare_cx),
+        link_roots=(gadgets.prepare_zero(BARE), gadgets.prepare_plus(BARE),
+                    gadgets.measure_z(BARE), bare_measure_x, bare_x, bare_h,
+                    bare_cx),
     )
     builder = cql.devices.DeviceBuilder("run_physical_bare_device",
                                         source_module=None)
@@ -542,6 +543,187 @@ def test_non_clifford_rotations(target):
     assert cudaq.run(build, shots_count=SHOTS) == [True] * SHOTS
 
 
+def keep(q):
+    return (q,)
+
+
+@cql.protocol
+def counted_loop() -> bool:
+    a = cql.prepare_zero(allocate())
+    a = cql.ops.repeat(3, carries=(a,), body=bare_x)
+    return gadgets.measure_z(BARE)(a)
+
+
+@cql.protocol
+def zero_trip_loop() -> bool:
+    a = cql.prepare_zero(allocate())
+    a = cql.ops.repeat(0, carries=(a,), body=bare_x)
+    return gadgets.measure_z(BARE)(a)
+
+
+@pytest.mark.parametrize("definition, expected", [(counted_loop, True),
+                                                  (zero_trip_loop, False)])
+def test_counted_loops(definition, expected):
+    assert cudaq.run(physical_build(definition),
+                     shots_count=SHOTS) == [expected] * SHOTS
+
+
+# A random bit is corrected to 0 at run time.
+@cql.protocol
+def feedback() -> tuple[bool, bool]:
+    a = cql.prepare_plus(allocate())
+    a, first = cql.mpp(Z(a[0]))
+    a, = cql.ops.cond(first,
+                      carries=(a,),
+                      then=lambda q: (bare_x(q),),
+                      else_=keep)
+    return first, gadgets.measure_z(BARE)(a)
+
+
+def flip_with_ancilla(q):
+    # The ancilla is acquired and released inside the branch.
+    ancilla = bare_x(cql.prepare_zero(allocate()))
+    ancilla, _ = cql.mpp(Z(ancilla[0]))
+    cql.discard(ancilla)
+    return (bare_x(q),)
+
+
+@cql.protocol
+def branch_local_ancilla() -> tuple[bool, bool]:
+    a = cql.prepare_plus(allocate())
+    a, first = cql.mpp(Z(a[0]))
+    a, = cql.ops.cond(first, carries=(a,), then=flip_with_ancilla, else_=keep)
+    return first, gadgets.measure_z(BARE)(a)
+
+
+@pytest.mark.parametrize("definition", [feedback, branch_local_ancilla])
+def test_feedback(definition):
+    results = cudaq.run(physical_build(definition), shots_count=100)
+    assert all(not corrected for _, corrected in results)
+    assert {first for first, _ in results} == {False, True}
+
+
+# The native projector does not emit `cflow.while`, and it rejects a branch on
+# another carrier's measurement, so these graphs are hand-written P3.
+# `teleport` sends |0>, |1>, |+>, or |-> (chosen by `flip` and `xbasis`) from
+# @a to @c and reads @c in the input's basis.
+TELEPORT = P3Fixture(
+    """
+module {
+  phys.machine @m {
+    phys.resource_class @q {count = 3 : i64, kind = "qubit", native_actions = [@x, @z, @h, @cx], native_instruments = [@mz]}
+  }
+  phys.action @x {arity = 1 : i64, process = "{\\"kind\\":\\"builtin\\",\\"name\\":\\"x\\",\\"parameters\\":{}}"}
+  phys.action @z {arity = 1 : i64, process = "{\\"kind\\":\\"builtin\\",\\"name\\":\\"z\\",\\"parameters\\":{}}"}
+  phys.action @h {arity = 1 : i64, process = "{\\"kind\\":\\"builtin\\",\\"name\\":\\"h\\",\\"parameters\\":{}}"}
+  phys.action @cx {arity = 2 : i64, process = "{\\"kind\\":\\"builtin\\",\\"name\\":\\"cx\\",\\"parameters\\":{}}"}
+  phys.instrument @mz {arity = 1 : i64, kind = "measure", preserves_inputs, process = "{\\"kind\\":\\"builtin\\",\\"name\\":\\"measure_z\\",\\"parameters\\":{}}", record_schema = "bit"}
+  phys.resource @a {index = 0 : i64, kind = "qubit", resource_class = @q}
+  phys.resource @b {index = 1 : i64, kind = "qubit", resource_class = @q}
+  phys.resource @c {index = 2 : i64, kind = "qubit", resource_class = @q}
+  phys.graph @teleport on @m : (i1, i1, i1) -> !phys.record<@bit> {
+  ^bb0(%flip: i1, %xbasis: i1, %corrected: i1):
+    %0:3 = phys.acquire [@a, @b, @c] {event_id = "acquire"} : !phys.state<@a>, !phys.state<@b>, !phys.state<@c>
+    %a1 = cflow.if %flip event_id = "prep_flip" -> !phys.state<@a> {
+      %t = phys.apply @x(%0#0) {event_id = "prep_x"} : (!phys.state<@a>) -> !phys.state<@a>
+      cflow.yield %t : !phys.state<@a>
+    } else {
+      cflow.yield %0#0 : !phys.state<@a>
+    }
+    %a2 = cflow.if %xbasis event_id = "prep_basis" -> !phys.state<@a> {
+      %t = phys.apply @h(%a1) {event_id = "prep_h"} : (!phys.state<@a>) -> !phys.state<@a>
+      cflow.yield %t : !phys.state<@a>
+    } else {
+      cflow.yield %a1 : !phys.state<@a>
+    }
+    %b1 = phys.apply @h(%0#1) {event_id = "bell_h"} : (!phys.state<@b>) -> !phys.state<@b>
+    %bc:2 = phys.apply @cx(%b1, %0#2) {event_id = "bell_cx"} : (!phys.state<@b>, !phys.state<@c>) -> (!phys.state<@b>, !phys.state<@c>)
+    %ab:2 = phys.apply @cx(%a2, %bc#0) {event_id = "bsm_cx"} : (!phys.state<@a>, !phys.state<@b>) -> (!phys.state<@a>, !phys.state<@b>)
+    %a3 = phys.apply @h(%ab#0) {event_id = "bsm_h"} : (!phys.state<@a>) -> !phys.state<@a>
+    %ma = phys.measure @mz(%a3) {destructive, event_id = "ma", record_id = "ma"} : (!phys.state<@a>) -> !phys.record<@bit>
+    %mb = phys.measure @mz(%ab#1) {destructive, event_id = "mb", record_id = "mb"} : (!phys.state<@b>) -> !phys.record<@bit>
+    %x_needed = phys.condition %mb {event_id = "x_needed"} : !phys.record<@bit> -> i1
+    %z_needed = phys.condition %ma {event_id = "z_needed"} : !phys.record<@bit> -> i1
+    %c1 = cflow.if %corrected event_id = "corrections" -> !phys.state<@c> {
+      %cx = cflow.if %x_needed event_id = "x_fix" -> !phys.state<@c> {
+        %t = phys.apply @x(%bc#1) {event_id = "fix_x"} : (!phys.state<@c>) -> !phys.state<@c>
+        cflow.yield %t : !phys.state<@c>
+      } else {
+        cflow.yield %bc#1 : !phys.state<@c>
+      }
+      %cz = cflow.if %z_needed event_id = "z_fix" -> !phys.state<@c> {
+        %t = phys.apply @z(%cx) {event_id = "fix_z"} : (!phys.state<@c>) -> !phys.state<@c>
+        cflow.yield %t : !phys.state<@c>
+      } else {
+        cflow.yield %cx : !phys.state<@c>
+      }
+      cflow.yield %cz : !phys.state<@c>
+    } else {
+      cflow.yield %bc#1 : !phys.state<@c>
+    }
+    %c2 = cflow.if %xbasis event_id = "read_basis" -> !phys.state<@c> {
+      %t = phys.apply @h(%c1) {event_id = "read_h"} : (!phys.state<@c>) -> !phys.state<@c>
+      cflow.yield %t : !phys.state<@c>
+    } else {
+      cflow.yield %c1 : !phys.state<@c>
+    }
+    %out = phys.measure @mz(%c2) {destructive, event_id = "out", record_id = "out"} : (!phys.state<@c>) -> !phys.record<@bit>
+    phys.return %out : !phys.record<@bit>
+  }
+}""", "teleport")
+
+
+def test_teleportation():
+    for flip in (False, True):
+        for xbasis in (False, True):
+            assert cudaq.run(TELEPORT, flip, xbasis, True,
+                             shots_count=SHOTS) == [flip] * SHOTS
+            # Without corrections the bit is random. Each value is missed in
+            # 100 shots with probability 2**-100.
+            assert set(cudaq.run(TELEPORT, flip, xbasis, False,
+                                 shots_count=100)) == {False, True}
+
+
+# A record saved before a loop keeps its value, a counted loop measures on
+# every iteration, and a dynamic loop measures until it reads 0.
+LOOPS = P3Fixture(
+    """
+module {
+  phys.machine @m {
+    phys.resource_class @q {count = 1 : i64, kind = "qubit", native_actions = [@x, @h], native_instruments = [@mz]}
+  }
+  phys.action @x {arity = 1 : i64, process = "{\\"kind\\":\\"builtin\\",\\"name\\":\\"x\\",\\"parameters\\":{}}"}
+  phys.action @h {arity = 1 : i64, process = "{\\"kind\\":\\"builtin\\",\\"name\\":\\"h\\",\\"parameters\\":{}}"}
+  phys.instrument @mz {arity = 1 : i64, kind = "measure", preserves_inputs, process = "{\\"kind\\":\\"builtin\\",\\"name\\":\\"measure_z\\",\\"parameters\\":{}}", record_schema = "bit"}
+  phys.resource @a {index = 0 : i64, kind = "qubit", resource_class = @q}
+  phys.graph @loops on @m : () -> (!phys.record<@bit>, !phys.record<@bit>, !phys.record<@bit>) {
+    %0 = phys.acquire [@a] {event_id = "acquire"} : !phys.state<@a>
+    %1, %saved = phys.measure @mz(%0) {event_id = "saved", record_id = "m"} : (!phys.state<@a>) -> (!phys.state<@a>, !phys.record<@bit>)
+    %2:2 = cflow.repeat 3 iter(%s: !phys.state<@a> = %1, %r: !phys.record<@bit> = %saved) event_id = "repeat" {
+      %3 = phys.apply @x(%s) {event_id = "flip"} : (!phys.state<@a>) -> !phys.state<@a>
+      %4, %m = phys.measure @mz(%3) {event_id = "each", record_id = "m"} : (!phys.state<@a>) -> (!phys.state<@a>, !phys.record<@bit>)
+      cflow.yield %4, %m : !phys.state<@a>, !phys.record<@bit>
+    }
+    %5:2 = cflow.while(%2#0, %2#1) event_id = "until_zero" : (!phys.state<@a>, !phys.record<@bit>) -> (!phys.state<@a>, !phys.record<@bit>) {
+    ^bb0(%s: !phys.state<@a>, %r: !phys.record<@bit>):
+      %one = phys.condition %r {event_id = "is_one"} : !phys.record<@bit> -> i1
+      cflow.while_condition %one, %s, %r : !phys.state<@a>, !phys.record<@bit>
+    } do {
+    ^bb0(%s: !phys.state<@a>, %r: !phys.record<@bit>):
+      %6 = phys.apply @h(%s) {event_id = "spread"} : (!phys.state<@a>) -> !phys.state<@a>
+      %7, %m = phys.measure @mz(%6) {event_id = "retry", record_id = "m"} : (!phys.state<@a>) -> (!phys.state<@a>, !phys.record<@bit>)
+      cflow.yield %7, %m : !phys.state<@a>, !phys.record<@bit>
+    }
+    phys.release %5#0 {event_id = "release"} : !phys.state<@a>
+    phys.return %saved, %2#1, %5#1 : !phys.record<@bit>, !phys.record<@bit>, !phys.record<@bit>
+  }
+}""", "loops")
+
+
+def test_loops_carry_records():
+    assert cudaq.run(LOOPS, shots_count=SHOTS) == [[False, True, False]] * SHOTS
+
+
 def test_run_contract_matches_ordinary_run():
     build = cql.compile(x_then_mz)
     assert cudaq.run(build, shots_count=0) == []
@@ -587,10 +769,12 @@ def state_result():
 
 
 @cql.protocol
-def counted_loop() -> bool:
-    a = cql.prepare_zero(allocate())
-    a = cql.ops.repeat(3, carries=(a,), body=bare_x)
-    return gadgets.measure_z(BARE)(a)
+def postselected() -> bool:
+    a = cql.prepare_plus(allocate())
+    a, bit = cql.mpp(Z(a[0]))
+    cql.ops.postselect(bit, expected=False)
+    cql.discard(a)
+    return bit
 
 
 @pytest.mark.parametrize("make, error, message", [
@@ -611,10 +795,10 @@ def counted_loop() -> bool:
                  RuntimeError,
                  r"returns result 0 of type '!phys.state<@state_result_",
                  id="state"),
-    pytest.param(lambda: physical_build(counted_loop),
+    pytest.param(lambda: physical_build(postselected),
                  RuntimeError,
-                 "'cflow.repeat' op has no lowering to Quake",
-                 id="control_flow"),
+                 "'event.selection' op post-selects shots",
+                 id="postselection"),
     pytest.param(physical(three_flips),
                  ValueError,
                  "requires a Build of a physical graph, not of a program",

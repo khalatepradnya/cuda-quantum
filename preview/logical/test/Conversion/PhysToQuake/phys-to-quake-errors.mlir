@@ -349,52 +349,8 @@ module {
 
 // -----
 
-// Runtime control flow is not lowered yet. A Python loop or branch in the
-// authoring code produces straight-line P3 and is supported.
-module {
-  phys.machine @m {
-    phys.resource_class @q {count = 1 : i64, kind = "qubit", native_actions = [@x], native_instruments = []}
-  }
-  phys.action @x {arity = 1 : i64, process = "{\"kind\":\"builtin\",\"name\":\"x\",\"parameters\":{}}"}
-  phys.resource @a {index = 0 : i64, kind = "qubit", resource_class = @q}
-  phys.graph @entry on @m : (i1) -> () {
-  ^bb0(%arg0: i1):
-    %0 = phys.acquire [@a] {event_id = "e0"} : !phys.state<@a>
-    // expected-error@+1 {{'cflow.if' op has no lowering to Quake}}
-    %1 = "cflow.if"(%arg0) <{event_id = "if0"}> ({
-      %2 = phys.apply @x(%0) {event_id = "x0"} : (!phys.state<@a>) -> !phys.state<@a>
-      cflow.yield %2 : !phys.state<@a>
-    }, {
-      cflow.yield %0 : !phys.state<@a>
-    }) : (i1) -> !phys.state<@a>
-    phys.release %1 {event_id = "e1"} : !phys.state<@a>
-    phys.return
-  }
-}
-
-// -----
-
-module {
-  phys.machine @m {
-    phys.resource_class @q {count = 1 : i64, kind = "qubit", native_actions = [@x], native_instruments = []}
-  }
-  phys.action @x {arity = 1 : i64, process = "{\"kind\":\"builtin\",\"name\":\"x\",\"parameters\":{}}"}
-  phys.resource @a {index = 0 : i64, kind = "qubit", resource_class = @q}
-  phys.graph @entry on @m : () -> () {
-    %0 = phys.acquire [@a] {event_id = "e0"} : !phys.state<@a>
-    // expected-error@+1 {{'cflow.repeat' op has no lowering to Quake}}
-    %1 = "cflow.repeat"(%0) <{count = 3 : i64, event_id = "repeat0"}> ({
-    ^bb0(%current: !phys.state<@a>):
-      %2 = phys.apply @x(%current) {event_id = "x0"} : (!phys.state<@a>) -> !phys.state<@a>
-      cflow.yield %2 : !phys.state<@a>
-    }) : (!phys.state<@a>) -> !phys.state<@a>
-    phys.release %1 {event_id = "e1"} : !phys.state<@a>
-    phys.return
-  }
-}
-
-// -----
-
+// Logical does not define what happens when a dynamic loop reaches
+// max_iterations. The loop follows test/Model/p3-structured-control.mlir.
 module {
   phys.machine @m {
     phys.resource_class @q {count = 1 : i64, kind = "qubit", native_actions = [], native_instruments = []}
@@ -403,7 +359,7 @@ module {
   phys.graph @entry on @m : (i1) -> () {
   ^bb0(%arg0: i1):
     %0 = phys.acquire [@a] {event_id = "e0"} : !phys.state<@a>
-    // expected-error@+1 {{'cflow.while' op has no lowering to Quake}}
+    // expected-error@+1 {{'cflow.while' op bounds the loop by max_iterations, and Logical does not define what happens at the bound}}
     %1:2 = "cflow.while"(%0, %arg0) <{event_id = "while0", max_iterations = 4 : i64}> ({
     ^bb0(%current: !phys.state<@a>, %predicate: i1):
       "cflow.while_condition"(%predicate, %current, %predicate) : (i1, !phys.state<@a>, i1) -> ()
