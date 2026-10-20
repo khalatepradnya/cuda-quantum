@@ -763,4 +763,3 @@ def test_modules_with_the_same_entry_name_run_independently():
 def test_entry_point_names_in_frontend_conventions(entry):
     quake = BOOL_RESULT.replace("@bool_result", "@" + entry)
     assert cudaq.run(QuakeArtifact(quake), shots_count=2) == [True] * 2
-
