@@ -28,6 +28,9 @@ add_subdirectory(lib/Compiler)
 
 # Cross-dialect lowerings (MLIR-style Conversion/<X>To<Y>).
 add_subdirectory(lib/Conversion/QuakeToQLX)
+if(QLX_USE_CUDAQ_SDK)
+  add_subdirectory(lib/Conversion/PhysToQuake)
+endif()
 add_subdirectory(lib/Conversion/QLXToLVM)
 
 # Translation backends (MLIR-style Target/).
