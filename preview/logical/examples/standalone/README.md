@@ -6,5 +6,6 @@ the logical authoring, placement, QEC selection, physical lowering, scheduling,
 and direct estimation APIs visible.
 
 The sequence progresses from portable logical programs through a complete
-physical schedule. The final Gidney--Ekerå lookup-addition example combines the
-steps in a small advanced workflow that remains suitable for routine testing.
+physical schedule. The Gidney--Ekerå lookup-addition example combines the steps
+in a small advanced workflow that remains suitable for routine testing. The last
+example runs physical programs with `cudaq.run`, with and without noise.

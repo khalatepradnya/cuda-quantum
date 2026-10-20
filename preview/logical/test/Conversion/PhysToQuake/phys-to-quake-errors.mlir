@@ -284,6 +284,139 @@ module {
 
 // -----
 
+// Calls are not lowered yet. A call template replays an earlier call, so a
+// program with templates stops at that call. The call follows
+// test/Model/p3-structured-control.mlir.
+module attributes {qlx.profiles = ["p3"]} {
+  fabric.gadget_spec @attempt_spec for @objective : () -> () {encodings = []}
+  fabric.gadget @attempt() {
+    fabric.return
+  } {realization_boundary = {}, spec = @attempt_spec}
+  fabric.gadget_profile @attempt_profile for @attempt {}
+  phys.machine @m {
+    phys.resource_class @q {count = 1 : i64, kind = "qubit", native_actions = []}
+  }
+  phys.resource @a {index = 0 : i64, kind = "qubit", resource_class = @q}
+  phys.graph @entry on @m : () -> () {
+    %0 = phys.acquire [@a] {event_id = "e0"} : !phys.state<@a>
+    // expected-error@+1 {{'phys.call' op has no lowering to Quake}}
+    %1 = "phys.call"(%0) <{callee = @attempt, event_id = "call0", instance = "attempt.0", profile = @attempt_profile}> ({
+    ^bb0(%current: !phys.state<@a>):
+      phys.yield %current : !phys.state<@a>
+    }) : (!phys.state<@a>) -> !phys.state<@a>
+    phys.release %1 {event_id = "e1"} : !phys.state<@a>
+    phys.return
+  }
+}
+
+// -----
+
+// Product measurements and rotations are not lowered yet. They follow
+// test/Model/p3-measure-product.mlir.
+module {
+  phys.instrument @mpp {kind = "measure_product", variadic, record_schema = "bit", preserves_inputs, process = "{\"kind\":\"builtin\",\"name\":\"measure_product\",\"parameters\":{}}"}
+  phys.machine @m {
+    phys.resource_class @q {count = 2 : i64, kind = "qubit", native_actions = [], native_instruments = [@mpp]}
+  }
+  phys.resource @a {index = 0 : i64, kind = "qubit", resource_class = @q}
+  phys.resource @b {index = 1 : i64, kind = "qubit", resource_class = @q}
+  phys.graph @entry on @m : () -> !phys.record<@bit> {
+    %0:2 = phys.acquire [@a, @b] {event_id = "e0"} : !phys.state<@a>, !phys.state<@b>
+    // expected-error@+1 {{'phys.measure_product' op has no lowering to Quake}}
+    %1:3 = phys.measure_product %0#0, %0#1 {event_id = "e1", instrument = @mpp, paulis = ["X", "Z"], record_id = "r"} : (!phys.state<@a>, !phys.state<@b>) -> (!phys.state<@a>, !phys.state<@b>, !phys.record<@bit>)
+    phys.release %1#0, %1#1 {event_id = "e2"} : !phys.state<@a>, !phys.state<@b>
+    phys.return %1#2 : !phys.record<@bit>
+  }
+}
+
+// -----
+
+module {
+  phys.machine @m {
+    phys.resource_class @q {count = 2 : i64, kind = "qubit", native_actions = [], native_instruments = []}
+  }
+  phys.resource @a {capabilities = ["qlx.physical/native_pauli_product_rotation"], index = 0 : i64, kind = "qubit", resource_class = @q}
+  phys.resource @b {capabilities = ["qlx.physical/native_pauli_product_rotation"], index = 1 : i64, kind = "qubit", resource_class = @q}
+  phys.graph @entry on @m : () -> () {
+    %0:2 = phys.acquire [@a, @b] {event_id = "e0"} : !phys.state<@a>, !phys.state<@b>
+    // expected-error@+1 {{'phys.rotate_product' op has no lowering to Quake}}
+    %1:2 = phys.rotate_product %0#0, %0#1 {angle = 1.250000e-01 : f64, event_id = "e1", paulis = ["Y", "Z"]} : (!phys.state<@a>, !phys.state<@b>) -> (!phys.state<@a>, !phys.state<@b>)
+    phys.release %1#0, %1#1 {event_id = "e2"} : !phys.state<@a>, !phys.state<@b>
+    phys.return
+  }
+}
+
+// -----
+
+// Runtime control flow is not lowered yet. A Python loop or branch in the
+// authoring code produces straight-line P3 and is supported.
+module {
+  phys.machine @m {
+    phys.resource_class @q {count = 1 : i64, kind = "qubit", native_actions = [@x], native_instruments = []}
+  }
+  phys.action @x {arity = 1 : i64, process = "{\"kind\":\"builtin\",\"name\":\"x\",\"parameters\":{}}"}
+  phys.resource @a {index = 0 : i64, kind = "qubit", resource_class = @q}
+  phys.graph @entry on @m : (i1) -> () {
+  ^bb0(%arg0: i1):
+    %0 = phys.acquire [@a] {event_id = "e0"} : !phys.state<@a>
+    // expected-error@+1 {{'cflow.if' op has no lowering to Quake}}
+    %1 = "cflow.if"(%arg0) <{event_id = "if0"}> ({
+      %2 = phys.apply @x(%0) {event_id = "x0"} : (!phys.state<@a>) -> !phys.state<@a>
+      cflow.yield %2 : !phys.state<@a>
+    }, {
+      cflow.yield %0 : !phys.state<@a>
+    }) : (i1) -> !phys.state<@a>
+    phys.release %1 {event_id = "e1"} : !phys.state<@a>
+    phys.return
+  }
+}
+
+// -----
+
+module {
+  phys.machine @m {
+    phys.resource_class @q {count = 1 : i64, kind = "qubit", native_actions = [@x], native_instruments = []}
+  }
+  phys.action @x {arity = 1 : i64, process = "{\"kind\":\"builtin\",\"name\":\"x\",\"parameters\":{}}"}
+  phys.resource @a {index = 0 : i64, kind = "qubit", resource_class = @q}
+  phys.graph @entry on @m : () -> () {
+    %0 = phys.acquire [@a] {event_id = "e0"} : !phys.state<@a>
+    // expected-error@+1 {{'cflow.repeat' op has no lowering to Quake}}
+    %1 = "cflow.repeat"(%0) <{count = 3 : i64, event_id = "repeat0"}> ({
+    ^bb0(%current: !phys.state<@a>):
+      %2 = phys.apply @x(%current) {event_id = "x0"} : (!phys.state<@a>) -> !phys.state<@a>
+      cflow.yield %2 : !phys.state<@a>
+    }) : (!phys.state<@a>) -> !phys.state<@a>
+    phys.release %1 {event_id = "e1"} : !phys.state<@a>
+    phys.return
+  }
+}
+
+// -----
+
+module {
+  phys.machine @m {
+    phys.resource_class @q {count = 1 : i64, kind = "qubit", native_actions = [], native_instruments = []}
+  }
+  phys.resource @a {index = 0 : i64, kind = "qubit", resource_class = @q}
+  phys.graph @entry on @m : (i1) -> () {
+  ^bb0(%arg0: i1):
+    %0 = phys.acquire [@a] {event_id = "e0"} : !phys.state<@a>
+    // expected-error@+1 {{'cflow.while' op has no lowering to Quake}}
+    %1:2 = "cflow.while"(%0, %arg0) <{event_id = "while0", max_iterations = 4 : i64}> ({
+    ^bb0(%current: !phys.state<@a>, %predicate: i1):
+      "cflow.while_condition"(%predicate, %current, %predicate) : (i1, !phys.state<@a>, i1) -> ()
+    }, {
+    ^bb0(%current: !phys.state<@a>, %predicate: i1):
+      cflow.yield %current, %predicate : !phys.state<@a>, i1
+    }) : (!phys.state<@a>, i1) -> (!phys.state<@a>, i1)
+    phys.release %1#0 {event_id = "e1"} : !phys.state<@a>
+    phys.return
+  }
+}
+
+// -----
+
 module {
   phys.machine @m {
     phys.resource_class @q {count = 1 : i64, kind = "qubit", native_actions = [], native_instruments = []}

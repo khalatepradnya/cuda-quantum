@@ -6,9 +6,12 @@ narrower in one direction and much wider in another.
 
 The one-sentence version: **Stim is the assembly language of QEC experiments;
 CUDA-Q Logical is the resource-estimation compiler stack above it** — and Stim
-text is its emission target. CUDA-Q Logical does not simulate, sample, or
-decode: no detector annotations, no detector error models, no samplers. Those
-studies start from the emitted circuit and belong to the Stim ecosystem.
+text is its emission target. CUDA-Q Logical does not decode: no detector
+annotations, no detector error models, no decoders. Those studies start from
+the emitted circuit and belong to the Stim ecosystem. To sample a straight-line
+physical program, with or without Pauli noise, pass its P3 Build to `cudaq.run`
+on the `stim` target
+([Run physical programs](../use-cases/run-physical-programs.md)).
 
 ## The translation table
 

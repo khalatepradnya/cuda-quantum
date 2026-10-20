@@ -37,6 +37,7 @@ Every row cites its exercising evidence in this repository.
 | Analytical and schedule estimation                                                                                                                      | shipped, exercised | `examples/02_surface_code_resource_estimate.py`, `examples/standalone/04_physical_schedule.py`, `examples/standalone/05_gidney_ekera_lookup_addition.py` |
 | Paper-specific Gidney–Ekerå RSA-2048/3072/4096 projection                                                                                               | shipped, exercised | `examples/05_gidney_ekera.py`                                                                                          |
 | Stim text emission — the `--fabric-to-stim` translation                                                                                                 | shipped, exercised | `examples/mlir/stim_memory.mlir` via `qlx-translate`; Stim-emission tests                                               |
+| P3 execution — `cudaq.run` on a straight-line physical Build that returns Booleans, with and without a noise model | shipped, exercised | `examples/standalone/06_run_physical_programs.py`; `test_run_physical.py` |
 
 ## Present but not yet exercised
 
@@ -50,21 +51,22 @@ your own risk until exercised evidence lands.
 
 ## Documented boundaries (all fail closed)
 
-**There are no detector, observable, detector-error-model, decoder, or sampling
+**There are no detector, observable, detector-error-model, or decoder
 semantics.** P3 retains typed physical error and timing *assumptions* so that
 `Tier.ANALYTICAL` and `Tier.SCHEDULE` can cost a realization — that is a
 parameter surface, not a noise model. CUDA-Q Logical does not annotate
-detectors or observables, generate or compose detector error models, sample
-circuits, or decode results. Those studies begin downstream of the emitted
-Stim text, in the Stim ecosystem.
+detectors or observables, generate or compose detector error models, or decode
+results. Those studies begin downstream of the emitted Stim text, in the Stim
+ecosystem. A noise model passed to `cudaq.run` applies to the gates a P3 Build
+emits, not to these timing assumptions.
 
 **Stages stop at P3.** P3 represents physical carriers, routing, native events,
-and schedules. It remains a compiler and estimation artifact: CUDA-Q Logical
-does not submit a physical schedule to hardware or provide a runtime execution
-service for it.
-
-**No simulator plugin surface.** Nothing in the package consumes or executes
-physical simulations.
+and schedules. CUDA-Q Logical does not submit a physical schedule to hardware.
+`cudaq.run` runs a straight-line P3 Build that returns Booleans on a CUDA-Q
+simulator, in program order and without its schedule's timing. P3 calls,
+product measurements and rotations, and runtime control flow do not run yet.
+[Run physical programs](../use-cases/run-physical-programs.md) states the
+limits.
 
 **The native P1 placer is a subset.** `qlx-to-lvm` is a deterministic first-fit
 placement for explicitly machine-scoped, inlined programs; the Python placement

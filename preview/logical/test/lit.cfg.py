@@ -44,7 +44,7 @@ if hasattr(config, "llvm_tools_dir") and config.llvm_tools_dir:
 config.environment["PATH"] = path
 
 # cudaq-opt runs CUDA-Q's own passes on the Quake that Logical emits. In-tree
-# it shares the tools dir, and the cudaq-devel wheel keeps it next to the LLVM
+# it shares the tools dir, and the `cudaq-devel` wheel keeps it next to the LLVM
 # tools. Other development setups have it on PATH. The substitution names the
 # file found. Adding its directory to PATH instead could let an installed
 # qlx-opt there shadow the one under test.

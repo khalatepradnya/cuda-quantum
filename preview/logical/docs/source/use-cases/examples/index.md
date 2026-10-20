@@ -1,6 +1,6 @@
 # CUDA-Q Logical by Example
 
-All twelve numbered Python programs under `preview/logical/examples/` run in
+All thirteen numbered Python programs under `preview/logical/examples/` run in
 the test suite. The top-level sequence uses ordinary CUDA-Q kernels and target
 stacks; the standalone sequence exposes each CUDA-Q Logical compiler stage
 directly.
@@ -29,4 +29,5 @@ code-and-gadget
 distillation
 physical-schedule
 lookup-addition
+run-physical-programs
 ```

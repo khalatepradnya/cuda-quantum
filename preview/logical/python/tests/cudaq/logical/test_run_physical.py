@@ -13,6 +13,7 @@ import pytest
 
 import cudaq
 import cudaq.logical as cql
+import cudaq.mlir.ir as mlir_ir
 from cudaq.logical import codes, gadgets
 from cudaq.logical.compiler import Build, PhysicalBuilder
 
@@ -51,7 +52,8 @@ machine = arch.PhysicalMachine(
         "qubits":
             arch.ResourceClass("qubit",
                                16,
-                               native_actions=actions.clifford_set(),
+                               native_actions=(*actions.clifford_set(),
+                                               actions.T),
                                native_instruments=(instruments.MZ,
                                                    instruments.MX))
     })
@@ -207,16 +209,83 @@ def test_results_match_ordinary_run(ordinary, definition):
     assert results == expected and types_of(results) == types_of(expected)
 
 
-def test_noise_model_applies_to_emitted_gates(target):
-    # A certain bit flip after each `x` undoes it. Of these targets, only
-    # density-matrix-cpu takes a channel with probability 1.
+@cql.physical(machine)
+def first_of_three():
+    # Only the first carrier sees `x`, so an `x` channel can change bit 0 only.
+    a, b, c = fresh(3)
+    return [cql.measure(flip(a)), cql.measure(b), cql.measure(c)]
+
+
+@cql.physical(machine)
+def t_gate():
+    q, = fresh()
+    return cql.measure(cql.ops.apply(actions.T, cql.ops.apply(actions.H, q)))
+
+
+def bit_flips(probability):
+    model = cudaq.NoiseModel()
+    model.add_all_qubit_channel("x", cudaq.BitFlipChannel(probability))
+    return model
+
+
+NOISE_SHOTS = 512
+
+
+def flipped_shots(results):
+    """How many shots lost the True that `x` produced in bit 0."""
+    return sum(not (result[0] if isinstance(result, list) else result)
+               for result in results)
+
+
+def test_noise_acts_on_emitted_gates(target):
+    # The same Builds run clean, noisy, and clean again, twice. A bit flip
+    # with probability 0.5 changes about half of the 512 shots: the bound is
+    # about 5.6 standard deviations. qpp-cpu ignores noise, for ordinary
+    # kernels too.
+    cudaq.set_random_seed(13)
+    scalar, listed = cql.compile(x_then_mz), cql.compile(first_of_three)
+    expected = range(192, 321) if target[0] != "qpp-cpu" else range(0, 1)
+    for _ in range(2):
+        for kernel, clean in ((ordinary_bool, True), (scalar, True),
+                              (listed, [True, False, False])):
+            assert cudaq.run(kernel,
+                             shots_count=NOISE_SHOTS) == [clean] * NOISE_SHOTS
+            noisy = cudaq.run(kernel,
+                              shots_count=NOISE_SHOTS,
+                              noise_model=bit_flips(0.5))
+            assert types_of(noisy) == types_of([clean] * NOISE_SHOTS)
+            assert flipped_shots(noisy) in expected
+            if isinstance(clean, list):
+                assert all(result[1:] == [False, False] for result in noisy)
+    assert cudaq.run(listed, shots_count=0, noise_model=bit_flips(0.5)) == []
+    assert cudaq.run(
+        listed, shots_count=2,
+        noise_model=cudaq.NoiseModel()) == [[True, False, False]] * 2
+
+
+def test_certain_noise_is_deterministic(target):
+    # Of these targets, only density-matrix-cpu takes probability 1.
     if target[0] != "density-matrix-cpu":
-        pytest.skip("needs a channel with probability 1")
-    noise = cudaq.NoiseModel()
-    noise.add_all_qubit_channel("x", cudaq.BitFlipChannel(1.0))
-    for kernel in (ordinary_bool, cql.compile(x_then_mz)):
+        pytest.skip("only density-matrix-cpu takes probability 1")
+    for kernel, noisy in ((ordinary_bool, False), (cql.compile(x_then_mz),
+                                                   False),
+                          (cql.compile(first_of_three), [False, False, False])):
         assert cudaq.run(kernel, shots_count=SHOTS,
-                         noise_model=noise) == [False] * SHOTS
+                         noise_model=bit_flips(1.0)) == [noisy] * SHOTS
+    assert cudaq.run(cql.compile(x_then_mz),
+                     shots_count=SHOTS) == [True] * SHOTS
+
+
+def test_failed_noisy_run_leaves_no_noise(target):
+    # stim rejects `t` after the run has started with the model.
+    if target[0] != "stim":
+        pytest.skip("only stim rejects the t gate")
+    with pytest.raises(RuntimeError, match="Gate not supported by Stim"):
+        cudaq.run(cql.compile(t_gate),
+                  shots_count=4,
+                  noise_model=bit_flips(0.5))
+    assert cudaq.run(cql.compile(x_then_mz),
+                     shots_count=NOISE_SHOTS) == [True] * NOISE_SHOTS
 
 
 BARE = codes.BareQubit
@@ -292,6 +361,50 @@ def test_arguments(flag):
     for kernel in (ordinary_flag_from_arguments,
                    physical_build(flag_from_arguments)):
         assert cudaq.run(kernel, 3, 0.5, flag, shots_count=2) == [flag] * 2
+
+
+class P3Fixture:
+    """Hand-written, verifier-checked P3 for forms that no producer emits
+    yet. `to_quake()` runs the same pass as `Build.to_quake()`."""
+
+    def __init__(self, text, entry):
+        self.text, self.entry = text, entry
+
+    def to_quake(self):
+        from cudaq.mlir._mlir_libs import _qlxRuntime
+        module = mlir_ir.Module.parse(self.text, context=mlir_ir.Context())
+        _qlxRuntime.run_pass_capsule(module,
+                                     f'phys-to-quake{{entry="{self.entry}"}}')
+        return module
+
+
+# `@cql.program` cannot compute with a traced `int` yet, so this graph uses
+# its `index` argument the way a P3 producer would.
+COMPARE_ARGUMENTS = P3Fixture(
+    """
+module {
+  phys.machine @m {
+    phys.resource_class @q {count = 1 : i64, kind = "qubit", native_actions = [], native_instruments = []}
+  }
+  phys.graph @compare on @m : (index, i1) -> (i1, i1, i1) {
+  ^bb0(%n: index, %flag: i1):
+    %zero = arith.constant 0 : index
+    %big = arith.constant 4294967296 : index
+    %negative = arith.cmpi slt, %n, %zero : index
+    %large = arith.cmpi sge, %n, %big : index
+    %inverted = phys.condition %flag {event_id = "e0", expected = false} : i1 -> i1
+    phys.return %negative, %large, %inverted : i1, i1, i1
+  }
+}""", "compare")
+
+
+@pytest.mark.parametrize("n, flag, expected",
+                         [(-5, True, [True, False, False]),
+                          (2**33, False, [False, True, True]),
+                          (7, True, [False, False, False])])
+def test_arguments_in_computations(n, flag, expected):
+    assert cudaq.run(COMPARE_ARGUMENTS, n, flag,
+                     shots_count=2) == [expected] * 2
 
 
 def test_computed_booleans():
