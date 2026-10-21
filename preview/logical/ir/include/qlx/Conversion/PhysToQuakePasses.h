@@ -4,7 +4,7 @@
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
- *******************************************************************************/
+ ******************************************************************************/
 
 // Declares `phys-to-quake`, which lowers a P3 physical graph to Quake. It
 // needs CUDA-Q's Quake and CC dialects, so it is built only when

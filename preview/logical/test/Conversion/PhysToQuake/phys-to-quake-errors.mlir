@@ -1,5 +1,5 @@
 // ========================================================================== //
-// Copyright (c) 2026 NVIDIA Corporation & Affiliates.                       //
+// Copyright (c) 2026 NVIDIA Corporation & Affiliates.                        //
 // All rights reserved.                                                       //
 //                                                                            //
 // This source code and the accompanying materials are made available under   //
@@ -180,16 +180,16 @@ module {
 
 // -----
 
-// A caller passes only scalars.
+// `cudaq.run` packs every integer argument wider than 1 bit into 64 bits. A
+// kernel reads an i8, i16, or i32 from the low bytes, but an i128 input reads
+// past the packed value, so -1 would not arrive as -1.
 module {
   phys.machine @m {
     phys.resource_class @q {count = 1 : i64, kind = "qubit", native_actions = [], native_instruments = []}
   }
-  phys.resource @a {architecture = @m, index = 0 : i64, kind = "qubit", resource_class = @q}
-  // expected-error@+1 {{'phys.graph' op takes input 0 of type '!phys.state<@a>', which a kernel cannot receive from its caller}}
-  phys.graph @entry on @m : (!phys.state<@a>) -> () {
-  ^bb0(%arg0: !phys.state<@a>):
-    phys.release %arg0 {event_id = "e0"} : !phys.state<@a>
+  // expected-error@+1 {{'phys.graph' op takes input 0 of type 'i128', which a kernel cannot receive from its caller}}
+  phys.graph @entry on @m : (i128) -> () {
+  ^bb0(%arg0: i128):
     phys.return
   }
 }
@@ -308,6 +308,68 @@ module attributes {qlx.profiles = ["p3"]} {
     // expected-error@+1 {{'phys.retry' op has no lowering to Quake}}
     %3 = phys.retry %2 carries (%1#0) {attempt = @attempt, attempt_event = "attempt0", decision_event = "decision0", event_id = "retry0", max_attempts = 3 : i64, profile = @attempt_profile} : (!phys.state<@a>) -> !phys.state<@a>
     phys.release %3 {event_id = "e1"} : !phys.state<@a>
+    phys.return
+  }
+}
+
+// -----
+
+// A template after a region cannot replay a call whose body reads a value
+// from inside that region: the value no longer exists.
+module attributes {qlx.profiles = ["p3"]} {
+  fabric.gadget_spec @gate_spec for @objective : () -> () {encodings = []}
+  fabric.gadget @gate() {
+    fabric.return
+  } {realization_boundary = {}, spec = @gate_spec}
+  phys.machine @m {
+    phys.resource_class @q {count = 2 : i64, kind = "qubit", native_actions = [], native_instruments = [@mz]}
+  }
+  phys.instrument @mz {arity = 1 : i64, kind = "measure", preserves_inputs, process = "{\"kind\":\"builtin\",\"name\":\"measure_z\",\"parameters\":{}}", record_schema = "bit"}
+  phys.resource @a {index = 0 : i64, kind = "qubit", resource_class = @q}
+  phys.resource @b {index = 1 : i64, kind = "qubit", resource_class = @q}
+  phys.graph @entry on @m : (i1) -> i1 {
+  ^bb0(%c: i1):
+    %0 = phys.acquire [@a] {event_id = "acquire_a"} : !phys.state<@a>
+    %1 = phys.acquire [@b] {event_id = "acquire_b"} : !phys.state<@b>
+    %2 = cflow.if %c event_id = "if" -> !phys.state<@a> {
+      %3, %r = phys.measure @mz(%0) {event_id = "m", record_id = "m"} : (!phys.state<@a>) -> (!phys.state<@a>, !phys.record<@bit>)
+      %4:2 = "phys.call"(%3) <{callee = @gate, event_id = "canon", instance = "gate.0"}> ({
+      ^bb0(%s: !phys.state<@a>):
+        %p = phys.condition %r {event_id = "p"} : !phys.record<@bit> -> i1
+        phys.yield %s, %p : !phys.state<@a>, i1
+      }) : (!phys.state<@a>) -> (!phys.state<@a>, i1)
+      cflow.yield %4#0 : !phys.state<@a>
+    } else {
+      cflow.yield %0 : !phys.state<@a>
+    }
+    // expected-error@+1 {{'phys.call_template' op replays the phys.call 'canon', whose body reads a value that is out of scope here}}
+    %5:2 = phys.call_template %1 {callee = @gate, event_id = "replay", instance = "gate.1", state_aliases = [{alias = @b, template = @a}], template_event = "canon"} : (!phys.state<@b>) -> (!phys.state<@b>, i1)
+    phys.release %2, %5#0 {event_id = "release"} : !phys.state<@a>, !phys.state<@b>
+    phys.return %5#1 : i1
+  }
+}
+
+// -----
+
+// A template inside its own canonical call would replay without end.
+module attributes {qlx.profiles = ["p3"]} {
+  fabric.gadget_spec @gate_spec for @objective : () -> () {encodings = []}
+  fabric.gadget @gate() {
+    fabric.return
+  } {realization_boundary = {}, spec = @gate_spec}
+  phys.machine @m {
+    phys.resource_class @q {count = 1 : i64, kind = "qubit", native_actions = [], native_instruments = []}
+  }
+  phys.resource @a {index = 0 : i64, kind = "qubit", resource_class = @q}
+  phys.graph @entry on @m : () -> () {
+    %0 = phys.acquire [@a] {event_id = "acquire_a"} : !phys.state<@a>
+    %1 = "phys.call"(%0) <{callee = @gate, event_id = "canon", instance = "gate.0"}> ({
+    ^bb0(%t: !phys.state<@a>):
+      // expected-error@+1 {{'phys.call_template' op replays the phys.call 'canon' that encloses it, which an inlined replay cannot express}}
+      phys.call_template {callee = @gate, event_id = "self", instance = "gate.1", state_boundary_elided, template_event = "canon"} : () -> ()
+      phys.yield %t : !phys.state<@a>
+    }) : (!phys.state<@a>) -> !phys.state<@a>
+    phys.release %1 {event_id = "release"} : !phys.state<@a>
     phys.return
   }
 }

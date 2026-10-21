@@ -4,11 +4,42 @@
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
- *******************************************************************************/
+ ******************************************************************************/
 
 // Lowers the P3 `phys.graph` named by the `entry` option to one Quake entry
 // point in value semantics, so that CUDA-Q can execute the physical
 // realization. PhysToQuakePasses.td states the translation rules.
+//
+// `Build.to_quake()` runs this pass on a copy of the Build's module. Then
+// `cudaq.run` admits the result like any other kernel: it goes through
+// `aot-prep-pipeline` and then the target's JIT pipeline.
+//
+// Example translation (P3 on the left, Quake on the right):
+//
+//   phys.acquire [@a]                    quake.null_wire
+//   phys.prepare %0 {state = "zero"}     quake.reset
+//   phys.apply @x(%1)                    quake.x
+//   phys.measure @mz(%2) {destructive}   quake.mz, then quake.sink
+//   phys.return %bit : !phys.record      quake.discriminate, then return i1
+//
+// Three choices shape the code below:
+//  - Value semantics. Each qubit is a `!quake.wire`, allocated at its
+//    `phys.acquire` and freed at its release or destructive measurement. So
+//    the Quake keeps P3's allocation points instead of allocating every qubit
+//    at the top of the kernel.
+//  - Qubits are tracked by physical resource (`GraphLowering::wires`), not by
+//    SSA value, because an elided call template acts on qubits without SSA
+//    operands or results.
+//  - Results are Booleans only: none, one `i1`, or one `!cc.sequence<i1>` for
+//    two or more. Core admission accepts other result types, so this pass
+//    enforces the rule.
+//
+// Layout:
+//  - Helpers for processes, symbol lookup, and gates.
+//  - `GraphLowering`, which translates one graph: entry signature, op
+//    dispatch, qubits, gates and measurements, calls and templates, control
+//    flow, and Booleans and the return.
+//  - `PhysToQuakePass`, the driver.
 
 #include "qlx/Conversion/PhysToQuakePasses.h"
 #include "qlx/Dialect/Cflow/IR/CflowOps.h"
@@ -28,10 +59,14 @@
 #include "cudaq/Optimizer/Dialect/Quake/QuakeTypes.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/JSON.h"
+#include "llvm/Support/MathExtras.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/IRMapping.h"
 #include <cmath>
+#include <cstdint>
+#include <limits>
+#include <optional>
 
 namespace qlx {
 #define GEN_PASS_DEF_PHYSTOQUAKE
@@ -45,6 +80,8 @@ namespace cc = cudaq::cc;
 
 /// Returns the builtin process name that an action or instrument declares, or
 /// failure, with a diagnostic on `declaration`, for any other process.
+/// The process, not the symbol name, defines what an action does: a device may
+/// call its X action `@x`, `@flip`, or anything else.
 static FailureOr<std::string> builtinProcess(Operation *declaration,
                                              StringRef process) {
   auto parsed = llvm::json::parse(process);
@@ -59,6 +96,8 @@ static FailureOr<std::string> builtinProcess(Operation *declaration,
     return declaration->emitOpError(
         "has a process that is not a builtin process, which has no exact "
         "lowering to Quake");
+  // A process with parameter values, such as `"angle": 0.5`, is more than
+  // the gate its name spells, so lowering it by name would drop the values.
   if (auto *parameters = object->getObject("parameters");
       parameters && !parameters->empty())
     return declaration->emitOpError(
@@ -66,8 +105,13 @@ static FailureOr<std::string> builtinProcess(Operation *declaration,
   return name->str();
 }
 
-/// Resolves a symbol the way the Phys verifier resolves an action: in the
-/// graph's machine first, then from `user` outward.
+/// Resolves a symbol in the graph's machine first, then from `user` outward,
+/// the way the Phys graph verifier resolves an action. A machine may define an
+/// action with the same name as a module-level one, and the pass must lower
+/// the action the verifier checked.
+/// Note: Instruments resolve the same way here, although `MeasureOp::verify`
+/// and `MeasureProductOp::verify` check the instrument they find outward from
+/// the op, which skips the machine.
 static Operation *resolveInMachine(SymbolTableCollection &symbols,
                                    phys::ArchitectureOp machine,
                                    Operation *user, FlatSymbolRefAttr symbol) {
@@ -102,11 +146,13 @@ static Value emitS(OpBuilder &builder, Location loc, bool adj, Value wire) {
 /// of Z.
 static Value emitBasisChange(OpBuilder &builder, Location loc, StringRef pauli,
                              bool undo, Value wire) {
+  // `H X H = Z`, and `H` is its own inverse.
   if (pauli == "X")
     return emitH(builder, loc, wire);
+  // The verifier allows only X, Y, and Z, and Z needs no change.
   if (pauli != "Y")
     return wire;
-  // `H Sdg Y S H = Z`.
+  // `H Sdg Y S H = Z`, so `V` is `Sdg` then `H`, and its inverse `H` then `S`.
   if (undo)
     return emitS(builder, loc, /*adj=*/false, emitH(builder, loc, wire));
   return emitH(builder, loc, emitS(builder, loc, /*adj=*/true, wire));
@@ -119,7 +165,9 @@ static Value emitReset(OpBuilder &builder, Location loc, Value wire) {
 
 /// Applies the builtin gate `name` to the wires of one lane, in the action's
 /// operand order. Returns the lane's output wires, or failure when the name
-/// has no exact Quake gate of that arity.
+/// has no exact Quake gate of that arity. Quake has no `sdg`, `tdg`, `cx`, or
+/// `cz` op: they are the adjoint `s` and `t`, and `x` and `z` controlled by
+/// the lane's first wire.
 static FailureOr<SmallVector<Value>> emitBuiltinGate(OpBuilder &builder,
                                                      Location loc,
                                                      StringRef name,
@@ -155,7 +203,11 @@ static FailureOr<SmallVector<Value>> emitBuiltinGate(OpBuilder &builder,
 
 namespace {
 
-/// Translates one `phys.graph` into the body of a `func.func`.
+/// Translates one `phys.graph` into the body of a `func.func`. It walks the
+/// graph's ops in program order and emits Quake at `builder`'s insertion
+/// point. Call bodies and control-flow regions recurse through `lowerOp`, so
+/// every op kind is handled in one place. A call template lowers its
+/// canonical call's body again, once per replay.
 class GraphLowering {
 public:
   GraphLowering(ModuleOp module, phys::GraphOp graph)
@@ -205,7 +257,10 @@ private:
   phys::ArchitectureOp machine;
   OpBuilder builder;
   SymbolTableCollection symbols;
-  /// Classical values and records. States are tracked in `wires`.
+  /// Classical values and records. A measured record maps to its
+  /// `!cc.measure_handle` until a Boolean is read from it, then to that `i1`.
+  /// A record from `arith.select` or from a region boundary maps to an `i1`.
+  /// States are tracked in `wires`.
   IRMapping values;
   /// The current wire of each live carrier, keyed by its physical resource.
   /// Note: An elided `phys.call_template` advances its carriers without new
@@ -220,6 +275,9 @@ private:
   /// Handles of inverted product measurements, whose bit is complemented
   /// where a Boolean is consumed.
   DenseSet<Value> invertedHandles;
+  /// The `phys.call` bodies being lowered, as calls or as template replays.
+  /// A template that replays one of them would recurse without end.
+  SmallPtrSet<Operation *, 4> activeCalls;
 };
 
 } // namespace
@@ -227,7 +285,7 @@ private:
 /// A record or an `i1` is Boolean. Every record that the pass sees comes from
 /// a measurement it lowers to one `quake.mz`, whatever the record's schema.
 static bool isBoolean(Type type) {
-  return isa<phys::RecordType>(type) || type.isInteger(1);
+  return isa<phys::RecordType>(type) || type.isSignlessInteger(1);
 }
 
 LogicalResult GraphLowering::checkSidecars() {
@@ -243,14 +301,28 @@ LogicalResult GraphLowering::checkSidecars() {
 FailureOr<FunctionType> GraphLowering::entryType() {
   FunctionType graphType = graph.getFunctionType();
   SmallVector<Type> inputs;
+  // A caller can pass only the classical scalars that `cudaq.run` passes
+  // exactly. It packs every integer wider than 1 bit into 64 bits, so a
+  // kernel input wider than 64 bits reads past the packed value. It packs no
+  // float type other than f32 and f64. The integer arithmetic that the pass
+  // emits needs signless integers. States and records exist only inside the
+  // kernel.
   for (auto [i, type] : llvm::enumerate(graphType.getInputs())) {
-    if (!type.isIntOrIndexOrFloat())
+    bool passable =
+        isa<IndexType>(type) || type.isF32() || type.isF64() ||
+        llvm::any_of(ArrayRef<unsigned>{1, 8, 16, 32, 64}, [&](unsigned width) {
+          return type.isSignlessInteger(width);
+        });
+    if (!passable)
       return graph.emitOpError()
              << "takes input " << i << " of type " << type
              << ", which a kernel cannot receive from its caller";
     // Python passes an `int` as `i64`, and Logical's `int` is `index`.
     inputs.push_back(isa<IndexType>(type) ? builder.getI64Type() : type);
   }
+  // A physical kernel returns Booleans only: one `bool`, or one `list[bool]`
+  // in return order, which `run` decodes like any kernel's result. A graph
+  // with no results lowers to an entry point with none, which `run` rejects.
   auto ret = cast<phys::ReturnOp>(graph.getBody().front().getTerminator());
   for (auto [i, type] : llvm::enumerate(graphType.getResults()))
     if (!isBoolean(type))
@@ -267,11 +339,16 @@ FailureOr<FunctionType> GraphLowering::entryType() {
 }
 
 FailureOr<func::FuncOp> GraphLowering::lower() {
+  // Step 1: Reject a graph that a selection sidecar post-selects.
   if (failed(checkSidecars()))
     return failure();
+  // Step 2: Compute the entry signature. This rejects inputs a caller cannot
+  // pass and results that are not Boolean, before any Quake is emitted.
   auto type = entryType();
   if (failed(type))
     return failure();
+  // Step 3: Look up the graph's machine, and index each `phys.call` by its
+  // `event_id` for the call templates that name it.
   // The Phys verifier guarantees that the architecture resolves.
   machine = symbols.lookupNearestSymbolFrom<phys::ArchitectureOp>(
       graph, graph.getArchitectureAttr());
@@ -282,9 +359,12 @@ FailureOr<func::FuncOp> GraphLowering::lower() {
       canonicalCalls[event.getValue()] = call;
   });
 
+  // Step 4: Create the entry point.
   // The entry point has no parent until the pass erases the source ops.
   // `builder` has no insertion point yet. The front-ends' kernel prefix keeps
-  // the name apart from the intrinsics the pass loads.
+  // the name apart from the intrinsics the pass loads. Admission requires
+  // `cudaq-entrypoint` on exactly one function, and core's QIR conversion
+  // marks the QIR entry point only on a `cudaq-kernel` function.
   auto entry = func::FuncOp::create(
       builder, graph.getLoc(),
       (Twine(cudaq::runtime::cudaqGenPrefixName) + graph.getSymName()).str(),
@@ -293,6 +373,9 @@ FailureOr<func::FuncOp> GraphLowering::lower() {
   entry->setAttr(cudaq::kernelAttrName, builder.getUnitAttr());
   Block *body = entry.addEntryBlock();
   builder.setInsertionPointToStart(body);
+  // Step 5: Map the graph's arguments to the entry's. An `index` argument
+  // arrives as `i64` and is cast back, so cloned `index` arithmetic still
+  // type-checks.
   for (auto [graphArg, entryArg] :
        llvm::zip(graph.getBody().getArguments(), body->getArguments())) {
     Value value = entryArg;
@@ -301,6 +384,8 @@ FailureOr<func::FuncOp> GraphLowering::lower() {
                                          builder.getIndexType(), entryArg);
     values.map(graphArg, value);
   }
+  // Step 6: Translate each op in program order. On failure, the diagnostic is
+  // already on the P3 op, and the half-built entry point is discarded.
   for (Operation &op : graph.getBody().front())
     if (failed(lowerOp(&op))) {
       entry.erase();
@@ -309,6 +394,9 @@ FailureOr<func::FuncOp> GraphLowering::lower() {
   return entry;
 }
 
+/// Translates one op at `builder`'s insertion point. A case emits Quake, maps
+/// the op's results, both, or neither. A rejected op gets a diagnostic, and an
+/// op with no case gets "has no lowering to Quake".
 LogicalResult GraphLowering::lowerOp(Operation *op) {
   Location loc = op->getLoc();
   return TypeSwitch<Operation *, LogicalResult>(op)
@@ -352,10 +440,14 @@ LogicalResult GraphLowering::lowerOp(Operation *op) {
       .Case<phys::DelayOp, phys::BarrierOp, phys::MoveOp, qlx::event::FenceOp>(
           [&](Operation *) { return success(); })
       .Case([&](phys::ReturnOp ret) { return lowerReturn(ret); })
+      // `cudaq.run` cannot discard a shot by its measured values, so it
+      // cannot drop the shots that post-selection rejects.
       .Case([&](qlx::event::SelectionOp selection) {
         return selection.emitOpError(
             "post-selects shots, which phys-to-quake does not support");
       })
+      // A resource flow moves an opaque payload, such as a factory's magic
+      // state. The graph does not state the gates that make or consume it.
       .Case<phys::ProduceResourceOp, phys::TransportResourceOp,
             phys::UnpackResourceOp, phys::PackResourceOp,
             phys::ResourceRequestOp, phys::ConsumeResourceOp,
@@ -369,15 +461,28 @@ LogicalResult GraphLowering::lowerOp(Operation *op) {
             "changes the code epoch, and phys-to-quake cannot check that the "
             "operations before it realize the declared logical action");
       })
+      // `arith` computes classical values, such as index arithmetic and
+      // comparisons, that mean the same in a kernel, so it is cloned with
+      // remapped operands. Anything else has no rule.
       .Default([&](Operation *other) -> LogicalResult {
-        if (isa_and_present<arith::ArithDialect>(other->getDialect())) {
-          builder.clone(*other, values);
-          return success();
-        }
-        return other->emitOpError("has no lowering to Quake");
+        if (!isa_and_present<arith::ArithDialect>(other->getDialect()))
+          return other->emitOpError("has no lowering to Quake");
+        // A record is Boolean, so `arith.select`, the only arith op that takes
+        // records, selects their bits. Selecting the measurement handles
+        // instead would drop an inverted product's complement, which
+        // `toBoolean` finds through the product's own handle.
+        for (Value operand : other->getOperands())
+          if (isa<phys::RecordType>(operand.getType()))
+            toBoolean(operand);
+        Operation *lowered = builder.clone(*other, values);
+        for (Value result : lowered->getResults())
+          if (isa<phys::RecordType>(result.getType()))
+            result.setType(builder.getI1Type());
+        return success();
       });
 }
 
+/// Rejects a state that one simulated qubit cannot stand for.
 LogicalResult GraphLowering::checkCarrier(Operation *op, Value state) {
   // The Phys verifier resolves every state's resource, and the resource's
   // class in the graph's machine.
@@ -395,20 +500,28 @@ LogicalResult GraphLowering::checkCarrier(Operation *op, Value state) {
   return success();
 }
 
+/// The physical resource that holds `state`. A state's type names its
+/// resource. While a call template replays a body written for other
+/// resources, `aliases` renames them to the invocation's.
 Attribute GraphLowering::carrierOf(Value state) {
   Attribute resource = cast<phys::StateType>(state.getType()).getResource();
   return aliases.lookup_or(resource, resource);
 }
 
+/// The current wire of the qubit that holds `state`.
 Value GraphLowering::wireOf(Value state) {
   return wires.lookup(carrierOf(state));
 }
 
+/// Makes `wire` the current wire of the qubit that holds `state`, so the next
+/// op on that qubit continues from it.
 void GraphLowering::setWire(Value state, Value wire) {
   wires[carrierOf(state)] = wire;
 }
 
 LogicalResult GraphLowering::lowerAcquire(phys::AcquireOp op) {
+  // The qubit is allocated here, not at the top of the kernel, so its
+  // lifetime in Quake is its lifetime in P3.
   for (Value state : op.getStates()) {
     if (failed(checkCarrier(op, state)))
       return failure();
@@ -420,6 +533,7 @@ LogicalResult GraphLowering::lowerAcquire(phys::AcquireOp op) {
 }
 
 LogicalResult GraphLowering::lowerRelease(phys::ReleaseOp op) {
+  // The resource can be acquired again later, which starts a new wire.
   for (Value state : op.getStates()) {
     quake::SinkOp::create(builder, op.getLoc(), wireOf(state));
     wires.erase(carrierOf(state));
@@ -428,8 +542,13 @@ LogicalResult GraphLowering::lowerRelease(phys::ReleaseOp op) {
 }
 
 /// Lowers `phys.prepare` and `phys.reset`, whose states mean the same thing.
+/// A preparation can act on a reused qubit in any state, so it resets instead
+/// of assuming |0>.
 LogicalResult GraphLowering::lowerPreparation(Operation *op, StringRef state,
                                               ValueRange inputs) {
+  // The verifier accepts any `phys.prepare` state name, and `zero` or `plus`
+  // for `phys.reset`. These are the names that `cudaq.logical.lower.lanes`
+  // gives `phys.prepare` a meaning.
   bool zero = state == "zero" || state == "0" || state == "loaded";
   bool plus = state == "plus" || state == "+";
   if (!zero && !plus)
@@ -501,6 +620,9 @@ LogicalResult GraphLowering::lowerMeasure(phys::MeasureOp op) {
   auto mz = quake::MzOp::create(builder, loc, cc::MeasureHandleType::get(ctx),
                                 TypeRange{quake::WireType::get(ctx)},
                                 ValueRange{wire}, StringAttr{});
+  // The record stays a measurement handle until a Boolean is read from it
+  // (`toBoolean`), as in the CUDA-Q front-ends, so a target can defer
+  // reading the result.
   values.map(op.getRecord(), mz.getMeasOut());
   wire = mz.getWires().front();
   if (op.getDestructive()) {
@@ -528,10 +650,13 @@ LogicalResult GraphLowering::lowerMeasureProduct(phys::MeasureProductOp op) {
   if (*name != "measure_product")
     return op.emitOpError() << "measures with builtin process '" << *name
                             << "', which has no lowering to Quake";
-  // The parity of the product collects on a fresh ancilla:
+  // Quake has no Pauli-product measurement, so the parity of the product
+  // collects on a fresh ancilla:
   //   ancilla = |0>; for each state: V_P; cx(state, ancilla); V_P^dagger
   //   mz(ancilla); sink(ancilla)
-  // so every measured state keeps its post-measurement state.
+  // Only the parity is measured, so every measured state keeps its
+  // post-measurement state. Measuring each state instead would collapse more
+  // than the product.
   Location loc = op.getLoc();
   auto *ctx = builder.getContext();
   Value ancilla =
@@ -549,17 +674,54 @@ LogicalResult GraphLowering::lowerMeasureProduct(phys::MeasureProductOp op) {
                                 ValueRange{ancilla}, StringAttr{});
   quake::SinkOp::create(builder, loc, mz.getWires().front());
   values.map(op.getRecord(), mz.getMeasOut());
+  // The complement is applied where the bit is read, not as an `x` on the
+  // ancilla, which a noise model would also act on.
   if (op.getInvert())
     invertedHandles.insert(mz.getMeasOut());
   return success();
 }
 
-/// Angles within this many quarter turns of a multiple of pi/2 are Clifford.
-static constexpr double cliffordAngleTolerance = 1e-9;
+/// A rotation by at most this many radians is the identity, as in core's
+/// `quake-simplify`, whose default `threshold` is the same.
+static constexpr double identityAngle = 1e-12;
+
+/// A Clifford product rotation has at most this many quarter turns, 128 full
+/// turns. Larger angles keep `rz`. Beyond the bound, an arbitrary angle such
+/// as 1e16 divides by pi/2 to an exact integer and would pass the residual
+/// check. The bound also keeps the integer conversion in range and every
+/// accepted angle within 1e-12 rad of the exact `k * pi / 2`.
+static constexpr double maxCliffordQuarterTurns = 512;
+
+/// An angle within this many machine epsilons of `k * (M_PI / 2)`, relative
+/// to that value, is `k` quarter turns. Producers pass the author's double
+/// through. Each way of writing `k * pi / 2` rounds to `k * (M_PI / 2)` or to
+/// a neighbor one ULP away.
+static constexpr double cliffordAngleEpsilons = 4;
+
+/// Returns `k` when `angle` is `k * pi / 2` up to floating-point rounding,
+/// with `|k| <= maxCliffordQuarterTurns`, and 0 when `|angle|` is at most
+/// `identityAngle`. Returns nullopt for any other angle, including a multiple
+/// of pi/2 beyond the bound, and that rotation keeps `rz`.
+static std::optional<std::int64_t> cliffordQuarterTurns(double angle) {
+  if (std::abs(angle) <= identityAngle)
+    return 0;
+  double quarterTurns = std::round(angle / (M_PI / 2));
+  if (!(std::abs(quarterTurns) <= maxCliffordQuarterTurns))
+    return std::nullopt;
+  double clifford = quarterTurns * (M_PI / 2);
+  double tolerance = cliffordAngleEpsilons *
+                     std::numeric_limits<double>::epsilon() *
+                     std::abs(clifford);
+  if (std::abs(angle - clifford) > tolerance)
+    return std::nullopt;
+  return static_cast<std::int64_t>(quarterTurns);
+}
 
 LogicalResult GraphLowering::lowerRotateProduct(phys::RotateProductOp op) {
-  // `exp(-i angle P / 2)`: change each Pauli to Z, collect the parity on the
-  // last state with a CX ladder, rotate it about Z, and undo.
+  // `exp(-i angle P / 2)` is Logical's rotation convention. Change each Pauli
+  // to Z, collect the parity on the last state with a CX ladder, rotate it
+  // about Z, and undo. A Z rotation of the parity is a rotation of the whole
+  // product, and the reverse ladder uncomputes the parity.
   Location loc = op.getLoc();
   SmallVector<Value> rotated;
   SmallVector<StringRef> labels;
@@ -574,13 +736,12 @@ LogicalResult GraphLowering::lowerRotateProduct(phys::RotateProductOp op) {
     control = cx[0];
     target = cx[1];
   }
-  // Stim runs no `rz`, so a Clifford angle becomes the Clifford gate that
-  // equals `rz` up to a global phase.
-  double angle = op.getAngle().convertToDouble();
-  double quarterTurns = angle / (M_PI / 2);
-  double nearest = std::round(quarterTurns);
-  if (std::abs(quarterTurns - nearest) <= cliffordAngleTolerance) {
-    switch ((static_cast<long long>(nearest) % 4 + 4) % 4) {
+  // Stim runs no `rz`, so an angle that `cliffordQuarterTurns` classifies
+  // becomes the Clifford gate that equals `rz` up to a global phase. Every
+  // other angle keeps `rz`, which is exact, and Stim rejects the program.
+  if (auto quarterTurns =
+          cliffordQuarterTurns(op.getAngle().convertToDouble())) {
+    switch (llvm::mod(*quarterTurns, 4)) {
     case 1:
       target = emitS(builder, loc, /*adj=*/false, target);
       break;
@@ -610,13 +771,19 @@ LogicalResult GraphLowering::lowerRotateProduct(phys::RotateProductOp op) {
 /// Inlines a call body: its block arguments take `inputs`, and its yielded
 /// values become `outputs`. States need no mapping, because a call keeps each
 /// state's resource.
+/// Rationale: Core's `aot-prep-pipeline` inlines helper functions anyway, so
+/// inlining here changes no result, and an inlined body needs no calling
+/// convention for wires.
 LogicalResult GraphLowering::lowerBody(phys::CallOp call, ValueRange inputs,
                                        ValueRange outputs) {
   Block &body = call.getBody().front();
   for (auto [argument, input] : llvm::zip(body.getArguments(), inputs))
     if (!isa<phys::StateType>(argument.getType()))
       values.map(argument, values.lookup(input));
-  if (failed(lowerOps(body)))
+  activeCalls.insert(call);
+  LogicalResult lowered = lowerOps(body);
+  activeCalls.erase(call);
+  if (failed(lowered))
     return failure();
   auto yield = cast<phys::YieldOp>(body.getTerminator());
   for (auto [yielded, output] : llvm::zip(yield.getOperands(), outputs))
@@ -629,8 +796,35 @@ LogicalResult GraphLowering::lowerCall(phys::CallOp op) {
   return lowerBody(op, op.getInputs(), op.getOutputs());
 }
 
+/// Replays the body of the earlier `phys.call` that `template_event` names.
+/// P3 states a repeated gadget call once, as that canonical body, and then as
+/// templates that run it again, on the same qubits or, through
+/// `state_aliases`, on others.
 LogicalResult GraphLowering::lowerCallTemplate(phys::CallTemplateOp op) {
   phys::CallOp canonical = canonicalCalls.lookup(op.getTemplateEvent());
+  // The replay is inlined, so a template inside its own canonical call would
+  // inline itself without end.
+  if (activeCalls.contains(canonical))
+    return op.emitOpError()
+           << "replays the phys.call '" << op.getTemplateEvent()
+           << "' that encloses it, which an inlined replay cannot express";
+  // The canonical call can sit in a control-flow region that has ended. Its
+  // body may read a classical value from that region, which has no mapping
+  // here.
+  Region &body = canonical.getBody();
+  WalkResult scope = body.walk([&](Operation *inner) {
+    // The Phys verifier rejects a call body that uses an outer state, so only
+    // classical values and records are read from outside the body.
+    for (Value operand : inner->getOperands())
+      if (!body.isAncestor(operand.getParentRegion()) &&
+          !values.contains(operand))
+        return WalkResult::interrupt();
+    return WalkResult::advance();
+  });
+  if (scope.wasInterrupted())
+    return op.emitOpError()
+           << "replays the phys.call '" << op.getTemplateEvent()
+           << "', whose body reads a value that is out of scope here";
   // The body names the canonical call's resources. `state_aliases` renames
   // them to this invocation's carriers, and an enclosing replay renames those
   // in turn. `resource_substitutions` mirrors `state_aliases` exactly.
@@ -651,6 +845,8 @@ LogicalResult GraphLowering::lowerCallTemplate(phys::CallTemplateOp op) {
   return lowered;
 }
 
+/// Lowers the ops of a call body or a control-flow region. The caller handles
+/// the terminator, because only it knows what the yielded values become.
 LogicalResult GraphLowering::lowerOps(Block &block) {
   for (Operation &op : block.without_terminator())
     if (failed(lowerOp(&op)))
@@ -673,6 +869,9 @@ SmallVector<Attribute> GraphLowering::liveCarriers() {
 // followed by the cflow op's classical values. A record crosses a region
 // boundary as its `i1`, which `toBoolean` complements for an inverted product.
 // States need no mapping inside a region, because each keeps its resource.
+// Every live carrier is carried, not only the ones a region names, because a
+// region can act on a carrier without naming it, through an elided call
+// template.
 //
 //   cflow.if %c -> (state<@a>, record)      %r:2 = cc.if(%c) ((%w = %a)) {
 //     ...                              =>     ...
@@ -710,6 +909,9 @@ SmallVector<Value> GraphLowering::carriedValues(ArrayRef<Attribute> carriers,
   return carried;
 }
 
+/// Maps a control-flow op's results back: `results` holds the carriers'
+/// wires, then the carried values of `physResults`. A carrier that is not in
+/// `carriers` is no longer live after the op.
 void GraphLowering::mapResults(ArrayRef<Attribute> carriers,
                                ValueRange physResults, ValueRange results) {
   wires.clear();
@@ -774,6 +976,9 @@ LogicalResult GraphLowering::lowerIf(qlx::cflow::IfOp op) {
   return success();
 }
 
+/// Lowers `cflow.repeat` to a counted `cc.loop` with an `i64` index. The loop
+/// stays rolled, as P3 states it, and core's codegen may still unroll it
+/// because the count is a constant. A count of 0 runs no iteration.
 LogicalResult GraphLowering::lowerRepeat(qlx::cflow::RepeatOp op) {
   Location loc = op.getLoc();
   SmallVector<Attribute> carriers = liveCarriers();
@@ -827,6 +1032,8 @@ LogicalResult GraphLowering::lowerRepeat(qlx::cflow::RepeatOp op) {
   return success();
 }
 
+/// Lowers `cflow.while` to a `cc.loop` whose condition region is the `before`
+/// region and whose body is the `after` region.
 LogicalResult GraphLowering::lowerWhile(qlx::cflow::WhileOp op) {
   if (op.getMaxIterationsAttr())
     return op.emitOpError(
@@ -895,6 +1102,8 @@ Value GraphLowering::toBoolean(Value physValue) {
   return bit;
 }
 
+/// `phys.condition` is true when its source bit, from a record or an `i1`,
+/// equals `expected`.
 LogicalResult GraphLowering::lowerCondition(phys::ConditionOp op) {
   Value bit = toBoolean(op.getSource());
   if (!op.getExpected()) {
@@ -905,6 +1114,8 @@ LogicalResult GraphLowering::lowerCondition(phys::ConditionOp op) {
   return success();
 }
 
+/// `phys.all_false` is true when no event is true: the negated OR of its
+/// events.
 LogicalResult GraphLowering::lowerAllFalse(phys::AllFalseOp op) {
   Location loc = op.getLoc();
   Value any = arith::ConstantIntOp::create(builder, loc, 0, 1);
@@ -958,6 +1169,8 @@ public:
 
   void runOnOperation() override {
     ModuleOp module = getOperation();
+    // Step 1: Find the graph to translate. `Build.to_quake()` names
+    // `Build.root`.
     auto graph = dyn_cast_or_null<phys::GraphOp>(
         SymbolTable::lookupSymbolIn(module, entry));
     if (entry.empty() || !graph) {
@@ -966,29 +1179,50 @@ public:
                          << entry << "' names none";
       return signalPassFailure();
     }
+    // Step 2: Remember the P3 source before translating, so that it can be
+    // erased once the entry point exists. Admission accepts only CUDA-Q
+    // dialects and exactly one entry point.
     SmallVector<Operation *> source;
     for (Operation &op : *module.getBody())
       source.push_back(&op);
+    // Step 3: Translate the graph into a detached entry point.
     auto entryPoint = GraphLowering(module, graph).lower();
     if (failed(entryPoint))
       return signalPassFailure();
-    // The module now holds Quake only: the entry point and the intrinsic that
-    // copies a list result to the heap. Loading it after the erasure keeps a
-    // source symbol of the same name from hiding it.
+    // Step 4: Replace the P3 source with the entry point. Other graphs in the
+    // module are erased untranslated, so they never cause a rejection.
     for (Operation *op : llvm::reverse(source))
       op->erase();
     module.push_back(*entryPoint);
+    // Step 5: Load the intrinsic that copies a returned list to the heap.
+    // Loading it after the erasure keeps a source symbol of the same name
+    // from hiding it.
     if (llvm::any_of(entryPoint->getResultTypes(),
                      llvm::IsaPred<cc::SequenceType>) &&
         failed(cudaq::IRBuilder::atBlockEnd(module.getBody())
                    .loadIntrinsic(module, "__nvqpp_vectorCopyCtor")))
       return signalPassFailure();
+    // Step 6: Drop Logical's `qlx.*` module attributes. They describe the P3
+    // Build, which is no longer in the module.
     SmallVector<StringAttr> logicalAttrs;
     for (NamedAttribute attr : module->getDiscardableAttrs())
       if (attr.getName().getValue().starts_with("qlx."))
         logicalAttrs.push_back(attr.getName());
     for (StringAttr name : logicalAttrs)
       module->removeAttr(name);
+    // Step 7: Keep core's quantum optimizations from rewriting the scheduled
+    // gates.
+    // Rationale: With `quake.noOptimization` on the module, the JIT and AOT
+    // drivers build the QIR pipeline without value-semantics optimization, so
+    // `quake-simplify` and `dqe` do not run (see
+    // `createTargetCodegenPipeline`). Without it, core could cancel or merge
+    // scheduled gates, erase the `quake.reset` that follows a
+    // `quake.null_wire`, or remove a qubit that nothing acts on. The run would
+    // then differ from what `to_quake()` shows, and a noise model would not act
+    // on the gates core removed. Note: Only the module's copy is set. A target
+    // pipeline that nests `dqe` or `quake-simplify` itself, such as IQM's,
+    // checks the kernel's copy, so it still runs them. The C++
+    // `disable_quantum_optimization` annotation sets both copies.
     module->setAttr(cudaq::runtime::disableQuantumOpts,
                     UnitAttr::get(module.getContext()));
   }

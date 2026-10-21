@@ -561,8 +561,17 @@ def zero_trip_loop() -> bool:
     return gadgets.measure_z(BARE)(a)
 
 
+# The last flip replays, as a call template, the call inside the loop body.
+@cql.protocol
+def flip_after_loop() -> bool:
+    a = cql.prepare_zero(allocate())
+    a = cql.ops.repeat(3, carries=(a,), body=bare_x)
+    return gadgets.measure_z(BARE)(bare_x(a))
+
+
 @pytest.mark.parametrize("definition, expected", [(counted_loop, True),
-                                                  (zero_trip_loop, False)])
+                                                  (zero_trip_loop, False),
+                                                  (flip_after_loop, False)])
 def test_counted_loops(definition, expected):
     assert cudaq.run(physical_build(definition),
                      shots_count=SHOTS) == [expected] * SHOTS

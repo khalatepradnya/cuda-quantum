@@ -4,7 +4,7 @@
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
- *******************************************************************************/
+ ******************************************************************************/
 
 #ifndef QLX_CONVERSION_PHYSTOQUAKE_PASSES_TD
 #define QLX_CONVERSION_PHYSTOQUAKE_PASSES_TD
@@ -37,8 +37,11 @@ def PhysToQuake : Pass<"phys-to-quake", "mlir::ModuleOp"> {
         ancilla, and the ancilla is measured and freed. With `invert`, the
         bit is complemented where it is read.
       - `phys.rotate_product` is `exp(-i angle P / 2)`: basis changes and a
-        CX ladder around `rz`, or around `s`, `z`, or `sdg` when the angle is
-        a multiple of pi/2, so that Clifford rotations run on Stim.
+        CX ladder around `rz`. A multiple of pi/2 up to floating-point
+        rounding, at most 128 full turns, uses `s`, `z`, `sdg`, or no gate
+        instead. Then Clifford rotations run on Stim. An angle whose
+        magnitude is at most 1e-12 rad uses no gate. Every other angle keeps
+        `rz`.
       - `phys.call` is inlined. `phys.call_template` replays the body of the
         call that `template_event` names, on the carriers that
         `state_aliases` maps the body's resources to. Each carrier's wire is
@@ -50,12 +53,13 @@ def PhysToQuake : Pass<"phys-to-quake", "mlir::ModuleOp"> {
         A `cflow.while` with `max_iterations` is rejected, because Logical
         does not define what happens at the bound.
       - Actions and instruments resolve in the graph's machine first, then
-        in the module, as in the Phys verifier.
+        in the module. The Phys graph verifier resolves actions the same way.
       - `phys.condition`, `phys.xor`, and `phys.all_false` become `i1` logic.
         A measurement stays a `!cc.measure_handle` until a Boolean is needed.
       - `phys.delay`, `phys.barrier`, `phys.move`, and `event.fence` emit
         nothing and forward their states.
-      - `arith` operations are cloned.
+      - `arith` operations are cloned. A record operand becomes its `i1`, so
+        an `arith.select` between records selects their bits.
 
     Every graph result must be Boolean: a measurement record, of any schema,
     or an `i1`. One result becomes the function's `i1` result. Two or more become one
@@ -64,9 +68,12 @@ def PhysToQuake : Pass<"phys-to-quake", "mlir::ModuleOp"> {
     parameter.
 
     Any other form fails with a diagnostic on its operation. That covers
-    retry, post-selection, resource and factory
-    flows, code epoch transitions, patch-granularity resources, parameterized
-    or non-builtin processes, quantum inputs, and non-Boolean results.
+    retry, post-selection, resource and factory flows, code epoch
+    transitions, patch-granularity resources, parameterized or non-builtin
+    processes, and non-Boolean results. It also covers a call template that
+    replays the call enclosing it, or whose canonical body reads a value that
+    is out of scope at the template. An input must be `index`, `f32`, `f64`,
+    or a sign-less integer of width 1, 8, 16, 32, or 64.
   }];
   let options = [
     Option<"entry", "entry", "std::string", /*default=*/"\"\"",

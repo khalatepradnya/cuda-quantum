@@ -57,8 +57,11 @@ without a result. Arguments pass as they do for an ordinary kernel. A Logical
   ancilla is measured and freed, so the measured qubits keep their
   post-measurement state. A negated product returns the complemented bit.
 - A product rotation by `angle` is `exp(-i angle P / 2)`: basis changes and a
-  `cx` ladder around `rz`. A multiple of pi/2 uses `s`, `z`, or `sdg` in
-  place of `rz`, so that Clifford rotations run on `stim`.
+  `cx` ladder around `rz`. A multiple of pi/2, up to floating-point rounding
+  and at most 128 full turns, uses `s`, `z`, `sdg`, or no gate in place of
+  `rz`. Then Clifford rotations run on `stim`. A rotation by at most 1e-12 rad
+  in magnitude uses no gate. Every other angle keeps `rz`, however close it is
+  to a multiple of pi/2.
 - A gadget call runs its body in place. A repeated call, which P3 states as a
   call template, runs the same body on its own qubits.
 - Runtime control flow runs at run time: `cql.ops.cond` branches on a
@@ -80,8 +83,8 @@ module, and the Build does not change.
   rotations run as the gates that `to_quake()` shows. A noise model acts on
   those gates, including the `cx` gates of a product measurement.
 - `stim` runs Clifford programs, also with Pauli noise, and suits larger
-  programs. It rejects `t` gates and product rotations by angles that are not
-  multiples of pi/2. `density-matrix-cpu` and `nvidia` also apply noise models.
+  programs. It rejects `t` gates and every product rotation that keeps
+  `rz`. `density-matrix-cpu` and `nvidia` also apply noise models.
   `qpp-cpu` ignores noise models with a warning, as it does for any kernel.
 
 ## Limits

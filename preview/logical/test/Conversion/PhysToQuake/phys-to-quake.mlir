@@ -1,5 +1,5 @@
 // ========================================================================== //
-// Copyright (c) 2026 NVIDIA Corporation & Affiliates.                       //
+// Copyright (c) 2026 NVIDIA Corporation & Affiliates.                        //
 // All rights reserved.                                                       //
 //                                                                            //
 // This source code and the accompanying materials are made available under   //
@@ -147,7 +147,9 @@ module {
 // A record of any schema stays a measurement handle until it is first read
 // and is discriminated once. `condition` is `bit == expected`, and `xor` and
 // `all_false` are `i1` logic, also with no events. `arith` ops are cloned,
-// and an `index` input is an `i64` parameter with a signed cast. Delay,
+// and an `index` input is an `i64` parameter with a signed cast. The unused
+// i8, i16, i32, i64, and f32 inputs are the other types a caller can pass.
+// Delay,
 // barrier, move, and fence emit nothing. Several results form one list in
 // return order.
 module {
@@ -156,8 +158,8 @@ module {
   }
   phys.instrument @mz {arity = 1 : i64, kind = "measure", preserves_inputs, process = "{\"kind\":\"builtin\",\"name\":\"measure_z\",\"parameters\":{}}", record_schema = "outcome"}
   phys.resource @a {architecture = @machine, index = 0 : i64, kind = "qubit", resource_class = @qubits}
-  phys.graph @entry on @machine : (index, f64, i1) -> (!phys.record<@outcome>, i1, i1, i1, i1, i1, i1) {
-  ^bb0(%arg0: index, %arg1: f64, %arg2: i1):
+  phys.graph @entry on @machine : (index, f64, i1, i8, i16, i32, i64, f32) -> (!phys.record<@outcome>, i1, i1, i1, i1, i1, i1) {
+  ^bb0(%arg0: index, %arg1: f64, %arg2: i1, %arg3: i8, %arg4: i16, %arg5: i32, %arg6: i64, %arg7: f32):
     %0 = phys.acquire [@a] {event_id = "e0"} : !phys.state<@a>
     %1 = phys.delay %0 {duration_ns = 2.000000e+01 : f64, event_id = "e1"} : (!phys.state<@a>) -> !phys.state<@a>
     %2 = phys.barrier %1 {event_id = "e2"} : (!phys.state<@a>) -> !phys.state<@a>
@@ -181,9 +183,14 @@ module {
 }
 
 // CHECK-LABEL:   func.func @__nvqpp__mlirgen__entry(
-// CHECK-SAME:      %[[ARG0:.*]]: i64,
-// CHECK-SAME:      %[[ARG1:.*]]: f64,
-// CHECK-SAME:      %[[ARG2:.*]]: i1) -> !cc.sequence<i1> attributes {"cudaq-entrypoint", "cudaq-kernel"} {
+// CHECK-SAME:      %[[ARG0:[^:]*]]: i64,
+// CHECK-SAME:      %[[ARG1:[^:]*]]: f64,
+// CHECK-SAME:      %[[ARG2:[^:]*]]: i1,
+// CHECK-SAME:      %[[ARG3:[^:]*]]: i8,
+// CHECK-SAME:      %[[ARG4:[^:]*]]: i16,
+// CHECK-SAME:      %[[ARG5:[^:]*]]: i32,
+// CHECK-SAME:      %[[ARG6:[^:]*]]: i64,
+// CHECK-SAME:      %[[ARG7:[^:]*]]: f32) -> !cc.sequence<i1> attributes {"cudaq-entrypoint", "cudaq-kernel"} {
 // CHECK:           %[[INDEX_CAST_0:.*]] = arith.index_cast %[[ARG0]] : i64 to index
 // CHECK:           %[[NULL_WIRE_0:.*]] = quake.null_wire
 // CHECK:           %[[VAL_0:.*]], %[[MZ_0:.*]] = quake.mz %[[NULL_WIRE_0]] : (!quake.wire) -> (!cc.measure_handle, !quake.wire)
@@ -231,6 +238,18 @@ module {
 // CHECK:           %[[SEQUENCE_INIT_1:.*]] = cc.sequence_init %[[VAL_1]], %[[SEQUENCE_SIZE_0]] : (!cc.ptr<i8>, i64) -> !cc.sequence<i1>
 // CHECK:           return %[[SEQUENCE_INIT_1]] : !cc.sequence<i1>
 // CHECK:         }
+// CHECK:         func.func private @llvm.memcpy.p0.p0.i64(!cc.ptr<i8>, !cc.ptr<i8>, i64, i1)
+// CHECK:         func.func private @malloc(i64) -> !cc.ptr<i8>
+// CHECK-LABEL:   func.func private @__nvqpp_vectorCopyCtor(
+// CHECK-SAME:      %[[ARG0:[^:]*]]: !cc.ptr<i8>,
+// CHECK-SAME:      %[[ARG1:[^:]*]]: i64,
+// CHECK-SAME:      %[[ARG2:[^:]*]]: i64) -> !cc.ptr<i8> {
+// CHECK:           %[[MULI_0:.*]] = arith.muli %[[ARG1]], %[[ARG2]] : i64
+// CHECK:           %[[VAL_0:.*]] = call @malloc(%[[MULI_0]]) : (i64) -> !cc.ptr<i8>
+// CHECK:           %[[CONSTANT_0:.*]] = arith.constant false
+// CHECK:           call @llvm.memcpy.p0.p0.i64(%[[VAL_0]], %[[ARG0]], %[[MULI_0]], %[[CONSTANT_0]]) : (!cc.ptr<i8>, !cc.ptr<i8>, i64, i1) -> ()
+// CHECK:           return %[[VAL_0]] : !cc.ptr<i8>
+// CHECK:         }
 
 // -----
 
@@ -239,6 +258,7 @@ module {
 // "measure_b" measures it. The elided "flip_b" has no SSA boundary, so %1
 // still names @b after it. "flip_c", inside the call "outer", replays "flip"
 // on @c, and the body of "outer" captures the records of the calls before it.
+// "outer_again" replays "outer", whose captured records are still in scope.
 module attributes {qlx.profiles = ["p3"]} {
   fabric.gadget_spec @gate_spec for @objective : () -> () {encodings = []}
   fabric.gadget @gate() {
@@ -277,7 +297,8 @@ module attributes {qlx.profiles = ["p3"]} {
       %e = phys.xor %p, %q {event_id = "parity"} : i1
       phys.yield %s, %e : !phys.state<@c>, i1
     }) : (!phys.state<@c>) -> (!phys.state<@c>, i1)
-    phys.release %3#0, %4#0, %6#0 {event_id = "release"} : !phys.state<@a>, !phys.state<@b>, !phys.state<@c>
+    %7:2 = phys.call_template %6#0 {callee = @gate, event_id = "outer_again", instance = "gate.6", template_event = "outer"} : (!phys.state<@c>) -> (!phys.state<@c>, i1)
+    phys.release %3#0, %4#0, %7#0 {event_id = "release"} : !phys.state<@a>, !phys.state<@b>, !phys.state<@c>
     phys.return %3#1, %4#1, %6#1 : !phys.record<@bit>, !phys.record<@bit>, i1
   }
 }
@@ -294,6 +315,8 @@ module attributes {qlx.profiles = ["p3"]} {
 // CHECK:           %[[DISCRIMINATE_0:.*]] = quake.discriminate %[[VAL_0]] : (!cc.measure_handle) -> i1
 // CHECK:           %[[DISCRIMINATE_1:.*]] = quake.discriminate %[[VAL_1]] : (!cc.measure_handle) -> i1
 // CHECK:           %[[XORI_0:.*]] = arith.xori %[[DISCRIMINATE_0]], %[[DISCRIMINATE_1]] : i1
+// CHECK:           %[[X_3:.*]] = quake.x %[[X_2]] : (!quake.wire) -> !quake.wire
+// CHECK:           %[[XORI_1:.*]] = arith.xori %[[DISCRIMINATE_0]], %[[DISCRIMINATE_1]] : i1
 
 // -----
 
@@ -476,3 +499,88 @@ module {
 // CHECK:           }
 // CHECK:           quake.sink %[[VAL_36:.*]]#0 : !quake.wire
 // CHECK:           quake.sink %[[VAL_36]]#1 : !quake.wire
+
+// -----
+
+// A rotation becomes `s`, `z`, `sdg`, or no gate only within 4 epsilons of
+// k*pi/2, relative to k*pi/2, for |k| <= 512, and no gate at |angle| <=
+// 1e-12. Every other angle keeps `rz`, including large angles whose quotient
+// by pi/2 rounds to an integer. In order: 3pi/2 + 1 ULP and 511 pi/2 + 1 ULP
+// give `sdg`. 513 pi/2, -513 pi/2, and pi/2 + 8 ULPs keep `rz`. 1e-12 gives
+// no gate, and 2e-12 and 1e16 keep `rz`. 512 pi/2 gives no gate.
+module {
+  phys.machine @m {
+    phys.resource_class @q {count = 1 : i64, kind = "qubit", native_actions = [], native_instruments = []}
+  }
+  phys.resource @a {capabilities = ["qlx.physical/native_pauli_product_rotation"], index = 0 : i64, kind = "qubit", resource_class = @q}
+  phys.graph @entry on @m : () -> () {
+    %0 = phys.acquire [@a] {event_id = "e0"} : !phys.state<@a>
+    %1 = phys.rotate_product %0 {angle = 0x4012D97C7F3321D3 : f64, event_id = "r1", paulis = ["Z"]} : (!phys.state<@a>) -> !phys.state<@a>
+    %2 = phys.rotate_product %1 {angle = 802.6769229921922 : f64, event_id = "r2", paulis = ["Z"]} : (!phys.state<@a>) -> !phys.state<@a>
+    %3 = phys.rotate_product %2 {angle = 805.818515645782 : f64, event_id = "r3", paulis = ["Z"]} : (!phys.state<@a>) -> !phys.state<@a>
+    %4 = phys.rotate_product %3 {angle = -805.818515645782 : f64, event_id = "r4", paulis = ["Z"]} : (!phys.state<@a>) -> !phys.state<@a>
+    %5 = phys.rotate_product %4 {angle = 1.5707963267948983 : f64, event_id = "r5", paulis = ["Z"]} : (!phys.state<@a>) -> !phys.state<@a>
+    %6 = phys.rotate_product %5 {angle = 1.000000e-12 : f64, event_id = "r6", paulis = ["Z"]} : (!phys.state<@a>) -> !phys.state<@a>
+    %7 = phys.rotate_product %6 {angle = 2.000000e-12 : f64, event_id = "r7", paulis = ["Z"]} : (!phys.state<@a>) -> !phys.state<@a>
+    %8 = phys.rotate_product %7 {angle = 1.000000e+16 : f64, event_id = "r8", paulis = ["Z"]} : (!phys.state<@a>) -> !phys.state<@a>
+    %9 = phys.rotate_product %8 {angle = 804.24771931898715 : f64, event_id = "r9", paulis = ["Z"]} : (!phys.state<@a>) -> !phys.state<@a>
+    phys.release %9 {event_id = "e1"} : !phys.state<@a>
+    phys.return
+  }
+}
+
+// CHECK-LABEL:   func.func @__nvqpp__mlirgen__entry() attributes {"cudaq-entrypoint", "cudaq-kernel"} {
+// CHECK:           %[[NULL_WIRE_0:.*]] = quake.null_wire
+// CHECK:           %[[S_0:.*]] = quake.s<adj> %[[NULL_WIRE_0]] : (!quake.wire) -> !quake.wire
+// CHECK:           %[[S_1:.*]] = quake.s<adj> %[[S_0]] : (!quake.wire) -> !quake.wire
+// CHECK:           %[[CONSTANT_0:.*]] = arith.constant 805.81851564578199 : f64
+// CHECK:           %[[RZ_0:.*]] = quake.rz (%[[CONSTANT_0]]) %[[S_1]] : (f64, !quake.wire) -> !quake.wire
+// CHECK:           %[[CONSTANT_1:.*]] = arith.constant -805.81851564578199 : f64
+// CHECK:           %[[RZ_1:.*]] = quake.rz (%[[CONSTANT_1]]) %[[RZ_0]] : (f64, !quake.wire) -> !quake.wire
+// CHECK:           %[[CONSTANT_2:.*]] = arith.constant 1.5707963267948983 : f64
+// CHECK:           %[[RZ_2:.*]] = quake.rz (%[[CONSTANT_2]]) %[[RZ_1]] : (f64, !quake.wire) -> !quake.wire
+// CHECK:           %[[CONSTANT_3:.*]] = arith.constant 2.000000e-12 : f64
+// CHECK:           %[[RZ_3:.*]] = quake.rz (%[[CONSTANT_3]]) %[[RZ_2]] : (f64, !quake.wire) -> !quake.wire
+// CHECK:           %[[CONSTANT_4:.*]] = arith.constant 1.000000e+16 : f64
+// CHECK:           %[[RZ_4:.*]] = quake.rz (%[[CONSTANT_4]]) %[[RZ_3]] : (f64, !quake.wire) -> !quake.wire
+// CHECK:           quake.sink %[[RZ_4]] : !quake.wire
+// CHECK:           return
+// CHECK:         }
+
+// -----
+
+// A record is Boolean, so `arith.select` between records selects their bits.
+// The inverted product's bit is complemented before the selection.
+module {
+  phys.instrument @mz {arity = 1 : i64, kind = "measure", preserves_inputs, process = "{\"kind\":\"builtin\",\"name\":\"measure_z\",\"parameters\":{}}", record_schema = "bit"}
+  phys.instrument @mpp {kind = "measure_product", variadic, record_schema = "bit", preserves_inputs, process = "{\"kind\":\"builtin\",\"name\":\"measure_product\",\"parameters\":{}}"}
+  phys.machine @m {
+    phys.resource_class @q {count = 1 : i64, kind = "qubit", native_actions = [], native_instruments = [@mz, @mpp]}
+  }
+  phys.resource @a {index = 0 : i64, kind = "qubit", resource_class = @q}
+  phys.graph @entry on @m : (i1) -> !phys.record<@bit> {
+  ^bb0(%choose: i1):
+    %0 = phys.acquire [@a] {event_id = "a"} : !phys.state<@a>
+    %1:2 = phys.measure_product %0 {event_id = "p", instrument = @mpp, invert, paulis = ["Z"], record_id = "p"} : (!phys.state<@a>) -> (!phys.state<@a>, !phys.record<@bit>)
+    %plain = phys.measure @mz(%1#0) {destructive, event_id = "m", record_id = "m"} : (!phys.state<@a>) -> !phys.record<@bit>
+    %record = arith.select %choose, %1#1, %plain : !phys.record<@bit>
+    phys.return %record : !phys.record<@bit>
+  }
+}
+
+// CHECK-LABEL:   func.func @__nvqpp__mlirgen__entry(
+// CHECK-SAME:      %[[ARG0:.*]]: i1) -> i1 attributes {"cudaq-entrypoint", "cudaq-kernel"} {
+// CHECK:           %[[NULL_WIRE_0:.*]] = quake.null_wire
+// CHECK:           %[[NULL_WIRE_1:.*]] = quake.null_wire
+// CHECK:           %[[X_0:.*]]:2 = quake.x {{\[}}%[[NULL_WIRE_0]]] %[[NULL_WIRE_1]] : (!quake.wire, !quake.wire) -> (!quake.wire, !quake.wire)
+// CHECK:           %[[VAL_0:.*]], %[[MZ_0:.*]] = quake.mz %[[X_0]]#1 : (!quake.wire) -> (!cc.measure_handle, !quake.wire)
+// CHECK:           quake.sink %[[MZ_0]] : !quake.wire
+// CHECK:           %[[VAL_1:.*]], %[[MZ_1:.*]] = quake.mz %[[X_0]]#0 : (!quake.wire) -> (!cc.measure_handle, !quake.wire)
+// CHECK:           quake.sink %[[MZ_1]] : !quake.wire
+// CHECK:           %[[DISCRIMINATE_0:.*]] = quake.discriminate %[[VAL_0]] : (!cc.measure_handle) -> i1
+// CHECK:           %[[CONSTANT_0:.*]] = arith.constant true
+// CHECK:           %[[XORI_0:.*]] = arith.xori %[[DISCRIMINATE_0]], %[[CONSTANT_0]] : i1
+// CHECK:           %[[DISCRIMINATE_1:.*]] = quake.discriminate %[[VAL_1]] : (!cc.measure_handle) -> i1
+// CHECK:           %[[SELECT_0:.*]] = arith.select %[[ARG0]], %[[XORI_0]], %[[DISCRIMINATE_1]] : i1
+// CHECK:           return %[[SELECT_0]] : i1
+// CHECK:         }
